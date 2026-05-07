@@ -4,9 +4,18 @@ const { Server } = require("socket.io");
 
 const app = express();
 
+
+app.get("/", (req, res) => {
+    res.send("Server Running");
+});
+
 const server = http.createServer(app);
 
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "*"
+    }
+});
 
 const rooms = {};
 
@@ -107,7 +116,10 @@ function LeaveRoom(socket) {
     socket.roomName = null;
 }
 
-server.listen(3000, () => {
+const PORT =
+    process.env.PORT || 3000;
 
-    console.log("Server Running On 3000");
+server.listen(PORT, () => {
+
+    console.log("Server Running On Port " + PORT);
 });
