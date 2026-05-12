@@ -47,7 +47,7 @@ io.on("connection", (socket) => {
         io.to(roomName).emit("playerList", playerNames);
 
         // ✅ NEW: NOTIFY ALL OTHERS WHO JUST JOINED (triggers popup)
-        socket.to(roomName).emit("playerJoined", playerName);
+        io.to(roomName).emit("playerJoined", playerName);
 
         socket.emit("joinedRoom", roomName);
     });
