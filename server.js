@@ -24,6 +24,7 @@ io.on("connection", (socket) => {
 
         const roomName = data.roomName;
         const playerName = data.playerName;
+        const photoUrl = data.photoUrl || "";
 
         if (!rooms[roomName]) {
             rooms[roomName] = [];
@@ -38,15 +39,16 @@ io.on("connection", (socket) => {
         socket.roomName = roomName;
         socket.playerName = playerName;
 
-        rooms[roomName].push({ id: socket.id, name: playerName });
+        rooms[roomName].push({ id: socket.id, name: playerName, photoUrl: photoUrl });
 
         console.log(playerName + " joined " + roomName);
 
-        // SEND FULL PLAYER LIST TO EVERYONE IN ROOM
-        const playerNames = rooms[roomName].map(p => p.name);
-        io.to(roomName).emit("playerList", playerNames);
+        const playerList = rooms[roomName].map(p => ({
+            name: p.name,
+            photoUrl: p.photoUrl
+        }));
 
-        // ✅ NEW: NOTIFY ALL OTHERS WHO JUST JOINED (triggers popup)
+        io.to(roomName).emit("playerList", playerList);
         io.to(roomName).emit("playerJoined", playerName);
 
         socket.emit("joinedRoom", roomName);
@@ -71,10 +73,12 @@ function LeaveRoom(socket) {
     if (rooms[roomName]) {
         rooms[roomName] = rooms[roomName].filter(p => p.id !== socket.id);
 
-        const playerNames = rooms[roomName].map(p => p.name);
-        io.to(roomName).emit("playerList", playerNames);
+        const playerList = rooms[roomName].map(p => ({
+            name: p.name,
+            photoUrl: p.photoUrl
+        }));
 
-        // ✅ NEW: NOTIFY ALL REMAINING PLAYERS WHO LEFT
+        io.to(roomName).emit("playerList", playerList);
         io.to(roomName).emit("playerLeft", socket.playerName);
 
         console.log(socket.playerName + " left");
