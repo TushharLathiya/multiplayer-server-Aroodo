@@ -76,9 +76,9 @@ io.on("connection", (socket) => {
 
     const room = getOrCreateRoom(roomName);
 
-    if (room.players.length >= 4) {
-      socket.emit("roomFull");
-      return;
+    if (room.players.length >= 4 || room.gameActive) {
+        socket.emit("roomFull");
+        return;
     }
 
     socket.join(roomName);
