@@ -177,22 +177,6 @@ function leaveRoom(socket) {
   }
 }
 
-function startGame(roomName) {
-  const room = rooms[roomName];
-  if (!room) return;
-
-  room.gameActive = true;
-  room.currentTurn = 0;
-
-  // Generate seed — all clients use this to build identical grid
-  const seed = Math.floor(Math.random() * 1000000);
-  room.gridSeed = seed;
-
-  console.log(`[${roomName}] Game started! Seed: ${seed}`);
-  io.to(roomName).emit("gameStart", { seed });
-
-  setTimeout(() => startTurn(roomName), 500);
-}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
