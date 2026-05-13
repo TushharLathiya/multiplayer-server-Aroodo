@@ -75,8 +75,8 @@ io.on("connection", (socket) => {
     if (!roomName || !playerName) return;
 
     const room = getOrCreateRoom(roomName);
-
-    if (room.players.length >= 4 || room.gameActive) {
+    //........................................................
+    if (room.players.length >= 2 || room.gameActive) {
         socket.emit("roomFull");
         return;
     }
@@ -99,8 +99,8 @@ io.on("connection", (socket) => {
 
     console.log(`[${roomName}] ${playerName} joined. Players: ${room.players}`);
 
-    // Start countdown when 4 players joined
-    if (room.players.length === 4 && !room.gameActive) {
+    // Start countdown when 4 players joined........................................................
+    if (room.players.length === 2 && !room.gameActive) {
       console.log(`[${roomName}] 4 players! Starting countdown...`);
       io.to(roomName).emit("countdownStart");
 
