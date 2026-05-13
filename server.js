@@ -11,11 +11,9 @@ const io = new Server(server, { cors: { origin: "*" } });
 const rooms = {};
 
 io.on("connection", (socket) => {
-
     console.log("Connected:", socket.id);
 
     socket.on("joinRoom", (data) => {
-
         const roomName = data.roomName;
         const playerName = data.playerName;
 
@@ -37,7 +35,6 @@ io.on("connection", (socket) => {
         socket.join(roomName);
         socket.roomName = roomName;
         socket.playerName = playerName;
-
         rooms[roomName].players.push({ id: socket.id, name: playerName });
 
         console.log(playerName + " joined " + roomName);
@@ -47,14 +44,13 @@ io.on("connection", (socket) => {
         io.to(roomName).emit("playerJoined", playerName);
         socket.emit("joinedRoom", roomName);
 
-        // START 3s COUNTDOWN WHEN 4 PLAYERS JOIN
         if (rooms[roomName].players.length === 4) {
+            console.log("4 players! Starting countdown...");
             io.to(roomName).emit("countdownStart");
             setTimeout(() => startGame(roomName), 3000);
         }
     });
 
-    // TEM BUTTON CLICKED
     socket.on("temClick", () => {
         const roomName = socket.roomName;
         if (!roomName || !rooms[roomName] || !rooms[roomName].gameActive) return;
@@ -66,21 +62,17 @@ io.on("connection", (socket) => {
         rooms[roomName].turnUsed = true;
         io.to(roomName).emit("temClicked", socket.playerName);
 
-        // Go to next turn after 1s
         clearTimeout(rooms[roomName].turnTimer);
         rooms[roomName].turnTimer = setTimeout(() => nextTurn(roomName), 1000);
     });
 
     socket.on("leaveRoom", () => LeaveRoom(socket));
-
-    socket.on("disconnect", () => {
-        LeaveRoom(socket);
-        console.log("Disconnected");
-    });
+    socket.on("disconnect", () => { LeaveRoom(socket); console.log("Disconnected"); });
 });
 
 function startGame(roomName) {
     if (!rooms[roomName]) return;
+    console.log("Game started in room: " + roomName);
     rooms[roomName].currentTurn = 0;
     rooms[roomName].gameActive = true;
     io.to(roomName).emit("gameStart");
@@ -89,17 +81,12 @@ function startGame(roomName) {
 
 function startTurn(roomName) {
     if (!rooms[roomName] || !rooms[roomName].gameActive) return;
-
     const player = rooms[roomName].players[rooms[roomName].currentTurn];
     if (!player) return;
-
     rooms[roomName].turnUsed = false;
-
+    console.log("Turn: " + player.name + " in room " + roomName);
     io.to(roomName).emit("turnStart", { playerName: player.name });
-
     if (rooms[roomName].turnTimer) clearTimeout(rooms[roomName].turnTimer);
-
-    // Auto next turn after 10s if player doesn't click
     rooms[roomName].turnTimer = setTimeout(() => nextTurn(roomName), 10000);
 }
 
@@ -114,25 +101,19 @@ function nextTurn(roomName) {
 function LeaveRoom(socket) {
     const roomName = socket.roomName;
     if (!roomName) return;
-
     socket.leave(roomName);
-
     if (rooms[roomName]) {
         rooms[roomName].players = rooms[roomName].players.filter(p => p.id !== socket.id);
-
         const playerNames = rooms[roomName].players.map(p => p.name);
         io.to(roomName).emit("playerList", playerNames);
         io.to(roomName).emit("playerLeft", socket.playerName);
-
         console.log(socket.playerName + " left");
-
         if (rooms[roomName].players.length === 0) {
             if (rooms[roomName].turnTimer) clearTimeout(rooms[roomName].turnTimer);
             delete rooms[roomName];
-            console.log("Room Deleted");
+            console.log("Room deleted");
         }
     }
-
     socket.roomName = null;
 }
 
