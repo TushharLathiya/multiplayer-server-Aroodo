@@ -42,11 +42,8 @@ io.on("connection", (socket) => {
 
         console.log(playerName + " joined " + roomName);
 
-        // SEND FULL PLAYER LIST TO EVERYONE IN ROOM
         const playerNames = rooms[roomName].map(p => p.name);
         io.to(roomName).emit("playerList", playerNames);
-
-        // ✅ NEW: NOTIFY ALL OTHERS WHO JUST JOINED (triggers popup)
         io.to(roomName).emit("playerJoined", playerName);
 
         socket.emit("joinedRoom", roomName);
@@ -73,8 +70,6 @@ function LeaveRoom(socket) {
 
         const playerNames = rooms[roomName].map(p => p.name);
         io.to(roomName).emit("playerList", playerNames);
-
-        // ✅ NEW: NOTIFY ALL REMAINING PLAYERS WHO LEFT
         io.to(roomName).emit("playerLeft", socket.playerName);
 
         console.log(socket.playerName + " left");
