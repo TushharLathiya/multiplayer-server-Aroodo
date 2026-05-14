@@ -141,6 +141,31 @@ io.on("connection", (socket) => {
   });
 });
 
+// BROADCAST ARROW CLICK TO ALL PLAYERS
+socket.on("arrowClicked", (data) => {
+    const roomName = socket.roomName;
+    if (!roomName) return;
+    const room = rooms[roomName];
+    if (!room || !room.gameActive) return;
+    // Only current turn player can trigger
+    if (room.players[room.currentTurn] !== socket.playerName) return;
+
+    io.to(roomName).emit("arrowClicked", { arrowIndex: data.arrowIndex });
+});
+
+// PLAYER DONE WITH TURN ACTION
+socket.on("turnDone", () => {
+    const roomName = socket.roomName;
+    const playerName = socket.playerName; 
+    if (!roomName || !playerName) return;
+    const room = rooms[roomName];
+    if (!room || !room.gameActive) return;
+    if (room.players[room.currentTurn] !== playerName) return;
+
+    console.log(`[${roomName}] ${playerName} done — next turn`);
+    nextTurn(roomName);
+});
+
 function leaveRoom(socket) {
   const roomName = socket.roomName;
   const playerName = socket.playerName;
