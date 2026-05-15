@@ -88,7 +88,7 @@ io.on("connection", (socket) => {
     }
 
     // Room is full or game already started
-    if (room.players.length >= 2 || room.gameActive) {
+    if (room.players.length >= 3 || room.gameActive) {
       socket.emit("roomFull");
       return;
     }
@@ -104,7 +104,7 @@ io.on("connection", (socket) => {
     socket.to(roomName).emit("playerJoined", playerName);
     console.log(`[${roomName}] ${playerName} joined. Players: ${room.players}`);
 
-    if (room.players.length === 2 && !room.gameActive) {
+    if (room.players.length === 3 && !room.gameActive) {
       console.log(`[${roomName}] 2 players! Starting countdown...`);
       io.to(roomName).emit("countdownStart");
       setTimeout(() => startGame(roomName), 4000);
