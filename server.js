@@ -8,11 +8,8 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 const rooms = {};
 
-function getOrCreateRoom(roomName) {
-  if (!rooms[roomName]) {
-    rooms[roomName] = { players: [], currentTurn: 0, gameActive: false, turnTimer: null };
-  }
-  return rooms[roomName];
+function generateRoomCode() {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 function startTurn(roomName) {
@@ -51,12 +48,46 @@ function startGame(roomName) {
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
+  // CREATE ROOM — generates a random code and creates the room
+  socket.on("createRoom", (data) => {
+    const { playerName } = data;
+    if (!playerName) return;
+
+    // Generate a unique code
+    let code = generateRoomCode();
+    while (rooms[code]) code = generateRoomCode(); // ensure unique
+
+    rooms[code] = {
+      players: [playerName],
+      currentTurn: 0,
+      gameActive: false,
+      turnTimer: null
+    };
+
+    socket.join(code);
+    socket.roomName = code;
+    socket.playerName = playerName;
+
+    console.log(`[${code}] Room created by ${playerName}`);
+
+    socket.emit("roomCreated", code);
+    io.to(code).emit("playerList", rooms[code].players);
+  });
+
+  // JOIN ROOM — only joins if room already exists
   socket.on("joinRoom", (data) => {
     const { roomName, playerName } = data;
     if (!roomName || !playerName) return;
 
-    const room = getOrCreateRoom(roomName);
+    const room = rooms[roomName];
 
+    // Room does not exist
+    if (!room) {
+      socket.emit("roomNotFound");
+      return;
+    }
+
+    // Room is full or game already started
     if (room.players.length >= 2 || room.gameActive) {
       socket.emit("roomFull");
       return;
@@ -80,7 +111,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ INSIDE connection
+  // ARROW CLICKED — validate turn, broadcast to all in room
   socket.on("arrowClicked", (data) => {
     const roomName = socket.roomName;
     if (!roomName) return;
@@ -91,7 +122,7 @@ io.on("connection", (socket) => {
     io.to(roomName).emit("arrowClicked", { arrowIndex: data.arrowIndex });
   });
 
-  // ✅ INSIDE connection
+  // TURN DONE — validate turn, advance to next player
   socket.on("turnDone", () => {
     const roomName = socket.roomName;
     const playerName = socket.playerName;
