@@ -75,8 +75,9 @@ function startMatch() {
 
   io.to(code).emit("matchFound", code);
   io.to(code).emit("playerList", playerNames);
+  io.to(code).emit("countdownStart"); 
 
-  setTimeout(() => startGame(code), 1000);
+  setTimeout(() => startGame(code), 4000); 
 
   // If more players remain in queue, restart timer for them
   if (matchQueue.length > 0) {
