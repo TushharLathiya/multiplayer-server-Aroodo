@@ -34,6 +34,18 @@ function startMatch() {
   if (matchTimer) { clearTimeout(matchTimer); matchTimer = null; }
   matchTimerStart = null;
 
+  // Only 1 player — cancel matchmaking, send them back
+  if (matchQueue.length < 2) {
+    const solo = matchQueue.splice(0, 1)[0];
+    const s = io.sockets.sockets.get(solo.socketId);
+    if (s) {
+      s.inMatchmaking = false;
+      s.emit("matchmakingFailed");
+    }
+    console.log(`[Matchmaking] Only 1 player in queue — match cancelled`);
+    return;
+  }
+
   // Take up to 4 players from the front of the queue
   const batch = matchQueue.splice(0, 4);
 
