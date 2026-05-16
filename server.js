@@ -48,47 +48,48 @@ function startGame(roomName) {
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
-  // CREATE ROOM — generates a random code and creates the room
+  // CREATE ROOM — generates a random code, stores max player count
   socket.on("createRoom", (data) => {
-    const { playerName } = data;
+    const { playerName, playerCount } = data;
     if (!playerName) return;
 
-    // Generate a unique code
+    // Clamp maxPlayers to valid range 2–4
+    const maxPlayers = (playerCount >= 2 && playerCount <= 4) ? playerCount : 2;
+
     let code = generateRoomCode();
-    while (rooms[code]) code = generateRoomCode(); // ensure unique
+    while (rooms[code]) code = generateRoomCode();
 
     rooms[code] = {
       players: [playerName],
       currentTurn: 0,
       gameActive: false,
-      turnTimer: null
+      turnTimer: null,
+      maxPlayers: maxPlayers
     };
 
     socket.join(code);
     socket.roomName = code;
     socket.playerName = playerName;
 
-    console.log(`[${code}] Room created by ${playerName}`);
+    console.log(`[${code}] Room created by ${playerName} (max ${maxPlayers} players)`);
 
     socket.emit("roomCreated", code);
     io.to(code).emit("playerList", rooms[code].players);
   });
 
-  // JOIN ROOM — only joins if room already exists
+  // JOIN ROOM — only joins if room exists and is not full
   socket.on("joinRoom", (data) => {
     const { roomName, playerName } = data;
     if (!roomName || !playerName) return;
 
     const room = rooms[roomName];
 
-    // Room does not exist
     if (!room) {
       socket.emit("roomNotFound");
       return;
     }
 
-    // Room is full or game already started
-    if (room.players.length >= 2 || room.gameActive) {
+    if (room.players.length >= room.maxPlayers || room.gameActive) {
       socket.emit("roomFull");
       return;
     }
@@ -102,10 +103,10 @@ io.on("connection", (socket) => {
     socket.emit("joinedRoom", roomName);
     io.to(roomName).emit("playerList", room.players);
     socket.to(roomName).emit("playerJoined", playerName);
-    console.log(`[${roomName}] ${playerName} joined. Players: ${room.players}`);
+    console.log(`[${roomName}] ${playerName} joined. Players: ${room.players} / ${room.maxPlayers}`);
 
-    if (room.players.length === 2 && !room.gameActive) {
-      console.log(`[${roomName}] 2 players! Starting countdown...`);
+    if (room.players.length === room.maxPlayers && !room.gameActive) {
+      console.log(`[${roomName}] ${room.maxPlayers} players ready! Starting countdown...`);
       io.to(roomName).emit("countdownStart");
       setTimeout(() => startGame(roomName), 4000);
     }
