@@ -1,252 +1,258 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
+'use strict';
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-const rooms = {};
-
-// NORMAL MATCHMAKING QUEUE
-let matchQueue = [];
-let matchTimer = null;
-let matchTimerStart = null;
-
-// COIN PARTY QUEUE (exactly 4 players)
-let coinQueue = [];
-
-function generateRoomCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-// ─── NORMAL MATCHMAKING ───────────────────────────────────────────
-function broadcastQueueUpdate() {
-  const playerCount = matchQueue.length;
-  const timeLeft = matchTimerStart
-    ? Math.max(0, Math.ceil((matchTimerStart + 10000 - Date.now()) / 1000))
-    : 10;
-  matchQueue.forEach(({ socketId }) => {
-    const s = io.sockets.sockets.get(socketId);
-    if (s) s.emit("matchmakingUpdate", { playerCount, timeLeft });
-  });
-}
-
-function startMatch() {
-  if (matchQueue.length === 0) return;
-  if (matchTimer) { clearTimeout(matchTimer); matchTimer = null; }
-  matchTimerStart = null;
-
-  if (matchQueue.length < 2) {
-    const solo = matchQueue.splice(0, 1)[0];
-    const s = io.sockets.sockets.get(solo.socketId);
-    if (s) { s.inMatchmaking = false; s.emit("matchmakingFailed"); }
-    console.log(`[Matchmaking] Only 1 player — match cancelled`);
-    return;
-  }
-
-  const batch = matchQueue.splice(0, 4);
-  let code = generateRoomCode();
-  while (rooms[code]) code = generateRoomCode();
-
-  const playerNames = batch.map(p => p.playerName);
-  rooms[code] = { players: [...playerNames], currentTurn: 0, gameActive: false, turnTimer: null, maxPlayers: playerNames.length };
-
-  batch.forEach(({ playerName, socketId }) => {
-    const s = io.sockets.sockets.get(socketId);
-    if (!s) return;
-    s.join(code); s.roomName = code; s.playerName = playerName; s.inMatchmaking = false;
-  });
-
-  console.log(`[Matchmaking] Match started: ${code} with ${playerNames}`);
-  io.to(code).emit("matchFound", code);
-  io.to(code).emit("playerList", playerNames);
-  io.to(code).emit("countdownStart");
-  setTimeout(() => startGame(code), 4000);
-
-  if (matchQueue.length > 0) {
-    matchTimerStart = Date.now();
-    broadcastQueueUpdate();
-    matchTimer = setTimeout(startMatch, 10000);
-  }
-}
-
-// ─── COIN PARTY ───────────────────────────────────────────────────
-function broadcastCoinQueueUpdate() {
-  coinQueue.forEach(({ socketId }) => {
-    const s = io.sockets.sockets.get(socketId);
-    if (s) s.emit("coinMatchUpdate", { playerCount: coinQueue.length });
-  });
-}
-
-function startCoinMatch() {
-  if (coinQueue.length < 4) return;
-
-  const batch = coinQueue.splice(0, 4);
-  let code = generateRoomCode();
-  while (rooms[code]) code = generateRoomCode();
-
-  const playerNames = batch.map(p => p.playerName);
-  rooms[code] = { players: [...playerNames], currentTurn: 0, gameActive: false, turnTimer: null, maxPlayers: 4 };
-
-  batch.forEach(({ playerName, socketId }) => {
-    const s = io.sockets.sockets.get(socketId);
-    if (!s) return;
-    s.join(code); s.roomName = code; s.playerName = playerName; s.inCoinMatch = false;
-  });
-
-  console.log(`[CoinParty] Match started: ${code} with ${playerNames}`);
-  io.to(code).emit("coinMatchFound", code);
-  io.to(code).emit("playerList", playerNames);
-  io.to(code).emit("countdownStart");
-  setTimeout(() => startGame(code), 4000);
-
-  if (coinQueue.length > 0) broadcastCoinQueueUpdate();
-}
-
-// ─── GAME LOGIC ───────────────────────────────────────────────────
-function startTurn(roomName) {
-  const room = rooms[roomName];
-  if (!room || !room.gameActive) return;
-  const playerName = room.players[room.currentTurn];
-  console.log(`[${roomName}] Turn: ${playerName}`);
-  io.to(roomName).emit("turnStart", { playerName });
-  if (room.turnTimer) clearTimeout(room.turnTimer);
-  room.turnTimer = setTimeout(() => { console.log(`[${roomName}] Time up`); nextTurn(roomName); }, 10000);
-}
-
-function nextTurn(roomName) {
-  const room = rooms[roomName];
-  if (!room || !room.gameActive) return;
-  if (room.turnTimer) clearTimeout(room.turnTimer);
-  room.currentTurn = (room.currentTurn + 1) % room.players.length;
-  startTurn(roomName);
-}
-
-function startGame(roomName) {
-  const room = rooms[roomName];
-  if (!room) return;
-  room.gameActive = true; room.currentTurn = 0;
-  console.log(`[${roomName}] Game started!`);
-  io.to(roomName).emit("gameStart");
-  setTimeout(() => startTurn(roomName), 500);
-}
-
-// ─── CONNECTIONS ──────────────────────────────────────────────────
-io.on("connection", (socket) => {
-  console.log("Connected:", socket.id);
-
-  socket.on("joinMatchmaking", (data) => {
-    const { playerName } = data;
-    if (!playerName) return;
-    matchQueue = matchQueue.filter(p => p.socketId !== socket.id);
-    matchQueue.push({ playerName, socketId: socket.id });
-    socket.inMatchmaking = true;
-    if (matchQueue.length === 1) { matchTimerStart = Date.now(); matchTimer = setTimeout(startMatch, 10000); }
-    broadcastQueueUpdate();
-    if (matchQueue.length >= 4) startMatch();
-  });
-
-  socket.on("leaveMatchmaking", () => {
-    matchQueue = matchQueue.filter(p => p.socketId !== socket.id);
-    socket.inMatchmaking = false;
-    if (matchQueue.length === 0 && matchTimer) { clearTimeout(matchTimer); matchTimer = null; matchTimerStart = null; }
-    else broadcastQueueUpdate();
-  });
-
-  socket.on("joinCoinMatch", (data) => {
-    const { playerName } = data;
-    if (!playerName) return;
-    coinQueue = coinQueue.filter(p => p.socketId !== socket.id);
-    coinQueue.push({ playerName, socketId: socket.id });
-    socket.inCoinMatch = true;
-    console.log(`[CoinParty] ${playerName} joined. Queue: ${coinQueue.length}/4`);
-    broadcastCoinQueueUpdate();
-    if (coinQueue.length >= 4) startCoinMatch();
-  });
-
-  socket.on("leaveCoinMatch", () => {
-    coinQueue = coinQueue.filter(p => p.socketId !== socket.id);
-    socket.inCoinMatch = false;
-    broadcastCoinQueueUpdate();
-  });
-
-  socket.on("createRoom", (data) => {
-    const { playerName, playerCount } = data;
-    if (!playerName) return;
-    const maxPlayers = (playerCount >= 2 && playerCount <= 4) ? playerCount : 2;
-    let code = generateRoomCode();
-    while (rooms[code]) code = generateRoomCode();
-    rooms[code] = { players: [playerName], currentTurn: 0, gameActive: false, turnTimer: null, maxPlayers };
-    socket.join(code); socket.roomName = code; socket.playerName = playerName;
-    socket.emit("roomCreated", code);
-    io.to(code).emit("playerList", rooms[code].players);
-  });
-
-  socket.on("joinRoom", (data) => {
-    const { roomName, playerName } = data;
-    if (!roomName || !playerName) return;
-    const room = rooms[roomName];
-    if (!room) { socket.emit("roomNotFound"); return; }
-    if (room.players.length >= room.maxPlayers || room.gameActive) { socket.emit("roomFull"); return; }
-    socket.join(roomName); socket.roomName = roomName; socket.playerName = playerName;
-    if (!room.players.includes(playerName)) room.players.push(playerName);
-    socket.emit("joinedRoom", roomName);
-    io.to(roomName).emit("playerList", room.players);
-    socket.to(roomName).emit("playerJoined", playerName);
-    if (room.players.length === room.maxPlayers && !room.gameActive) {
-      io.to(roomName).emit("countdownStart");
-      setTimeout(() => startGame(roomName), 4000);
-    }
-  });
-
-  socket.on("arrowClicked", (data) => {
-    const roomName = socket.roomName;
-    if (!roomName) return;
-    const room = rooms[roomName];
-    if (!room || !room.gameActive) return;
-    if (room.players[room.currentTurn] !== socket.playerName) return;
-    io.to(roomName).emit("arrowClicked", { arrowIndex: data.arrowIndex });
-  });
-
-  socket.on("turnDone", () => {
-    const roomName = socket.roomName;
-    const playerName = socket.playerName;
-    if (!roomName || !playerName) return;
-    const room = rooms[roomName];
-    if (!room || !room.gameActive) return;
-    if (room.players[room.currentTurn] !== playerName) return;
-    nextTurn(roomName);
-  });
-
-  socket.on("leaveRoom", () => leaveRoom(socket));
-  socket.on("disconnect", () => {
-    matchQueue = matchQueue.filter(p => p.socketId !== socket.id);
-    if (matchQueue.length === 0 && matchTimer) { clearTimeout(matchTimer); matchTimer = null; matchTimerStart = null; }
-    else if (matchQueue.length > 0) broadcastQueueUpdate();
-
-    coinQueue = coinQueue.filter(p => p.socketId !== socket.id);
-    if (coinQueue.length > 0) broadcastCoinQueueUpdate();
-
-    leaveRoom(socket);
-    console.log("Disconnected:", socket.id);
-  });
-});
-
-function leaveRoom(socket) {
-  const roomName = socket.roomName;
-  const playerName = socket.playerName;
-  if (!roomName || !playerName) return;
-  socket.leave(roomName); socket.roomName = null; socket.playerName = null;
-  const room = rooms[roomName];
-  if (!room) return;
-  room.players = room.players.filter(p => p !== playerName);
-  socket.to(roomName).emit("playerLeft", playerName);
-  io.to(roomName).emit("playerList", room.players);
-  if (room.gameActive && room.players.length < 1) { if (room.turnTimer) clearTimeout(room.turnTimer); room.gameActive = false; }
-  else if (room.gameActive && room.currentTurn >= room.players.length) { room.currentTurn = 0; startTurn(roomName); }
-  if (room.players.length === 0) delete rooms[roomName];
-}
+const http = require('http');
+const { Server } = require('socket.io');
+const server = http.createServer();
+const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const rooms    = {};       // roomName → { players: [], maxPlayers, sockets: {} }
+let matchQueue = [];       // free matchmaking queue
+let coinQueue  = [];       // 4-player coin party queue
+let coinQueue2 = [];       // 2-player coin party queue
+
+let matchTimer  = null;
+let matchTimeLeft = 10;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function makeRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+function broadcastQueueUpdate() {
+    matchQueue.forEach(s => s.emit('matchmakingUpdate', { playerCount: matchQueue.length, timeLeft: matchTimeLeft }));
+}
+
+function broadcastCoinQueueUpdate() {
+    coinQueue.forEach(s => s.emit('coinMatchUpdate', { playerCount: coinQueue.length }));
+}
+
+function broadcastCoinQueue2Update() {
+    coinQueue2.forEach(s => s.emit('coinMatch2Update', { playerCount: coinQueue2.length }));
+}
+
+function startMatch(sockets) {
+    const code = makeRoomCode();
+    const players = sockets.map(s => s.playerName);
+    rooms[code] = { players: [...players], maxPlayers: players.length, sockets: {} };
+    sockets.forEach(s => {
+        s.join(code);
+        s.currentRoom = code;
+        rooms[code].sockets[s.playerName] = s;
+        s.emit('matchFound', code);
+    });
+    io.to(code).emit('playerList', players);
+    io.to(code).emit('countdownStart');
+}
+
+function startCoinMatch(sockets) {
+    const code = makeRoomCode();
+    const players = sockets.map(s => s.playerName);
+    rooms[code] = { players: [...players], maxPlayers: players.length, sockets: {} };
+    sockets.forEach(s => {
+        s.join(code);
+        s.currentRoom = code;
+        rooms[code].sockets[s.playerName] = s;
+        s.emit('coinMatchFound', code);
+    });
+    io.to(code).emit('playerList', players);
+    io.to(code).emit('countdownStart');
+}
+
+function startCoinMatch2(sockets) {
+    const code = makeRoomCode();
+    const players = sockets.map(s => s.playerName);
+    rooms[code] = { players: [...players], maxPlayers: players.length, sockets: {} };
+    sockets.forEach(s => {
+        s.join(code);
+        s.currentRoom = code;
+        rooms[code].sockets[s.playerName] = s;
+        s.emit('coinMatch2Found', code);
+    });
+    io.to(code).emit('playerList', players);
+    io.to(code).emit('countdownStart');
+}
+
+function leaveRoom(socket) {
+    const room = socket.currentRoom;
+    if (!room || !rooms[room]) return;
+
+    const playerName = socket.playerName;
+    rooms[room].players = rooms[room].players.filter(p => p !== playerName);
+    delete rooms[room].sockets[playerName];
+    socket.leave(room);
+    socket.currentRoom = null;
+
+    if (rooms[room].players.length === 0) {
+        delete rooms[room];
+    } else {
+        io.to(room).emit('playerLeft', playerName);
+        io.to(room).emit('playerList', rooms[room].players);
+    }
+}
+
+// ─── Free matchmaking timer ───────────────────────────────────────────────────
+function startMatchTimer() {
+    if (matchTimer) return;
+    matchTimeLeft = 10;
+    matchTimer = setInterval(() => {
+        matchTimeLeft--;
+        broadcastQueueUpdate();
+        if (matchTimeLeft <= 0) {
+            clearInterval(matchTimer); matchTimer = null;
+            if (matchQueue.length >= 2) {
+                const group = matchQueue.splice(0, matchQueue.length);
+                startMatch(group);
+            } else if (matchQueue.length === 1) {
+                const solo = matchQueue.splice(0, 1)[0];
+                solo.emit('matchmakingFailed');
+            }
+        }
+    }, 1000);
+}
+
+// ─── Socket connection ────────────────────────────────────────────────────────
+io.on('connection', socket => {
+    console.log('connected:', socket.id);
+
+    // ── Create room ──────────────────────────────────────────────────────────
+    socket.on('createRoom', ({ playerName, playerCount }) => {
+        const code = makeRoomCode();
+        socket.playerName = playerName;
+        socket.currentRoom = code;
+        const max = (playerCount >= 2 && playerCount <= 4) ? playerCount : 4;
+        rooms[code] = { players: [playerName], maxPlayers: max, sockets: { [playerName]: socket } };
+        socket.join(code);
+        socket.emit('roomCreated', code);
+        io.to(code).emit('playerList', rooms[code].players);
+    });
+
+    // ── Join room ────────────────────────────────────────────────────────────
+    socket.on('joinRoom', ({ roomName, playerName }) => {
+        const room = rooms[roomName];
+        if (!room) { socket.emit('roomNotFound'); return; }
+        if (room.players.length >= room.maxPlayers) { socket.emit('roomFull'); return; }
+
+        socket.playerName = playerName;
+        socket.currentRoom = roomName;
+        room.players.push(playerName);
+        room.sockets[playerName] = socket;
+        socket.join(roomName);
+
+        socket.emit('joinedRoom', roomName);
+        io.to(roomName).emit('playerJoined', playerName);
+        io.to(roomName).emit('playerList', room.players);
+
+        if (room.players.length === room.maxPlayers)
+            io.to(roomName).emit('countdownStart');
+    });
+
+    // ── Leave room ───────────────────────────────────────────────────────────
+    socket.on('leaveRoom', () => leaveRoom(socket));
+
+    // ── Game start ───────────────────────────────────────────────────────────
+    socket.on('gameStart', () => {
+        const room = socket.currentRoom;
+        if (room) io.to(room).emit('gameStart');
+    });
+
+    // ── Turn done ─────────────────────────────────────────────────────────────
+    socket.on('turnDone', () => {
+        const room = socket.currentRoom;
+        if (!room || !rooms[room]) return;
+        const players = rooms[room].players;
+        if (players.length === 0) return;
+
+        // Advance to next player round-robin
+        const cur = rooms[room].currentTurnIndex ?? 0;
+        const next = (cur + 1) % players.length;
+        rooms[room].currentTurnIndex = next;
+        io.to(room).emit('turnStart', { playerName: players[next] });
+    });
+
+    // ── countdownStart → server kicks off first turn after 4s ────────────────
+    socket.on('readyForTurn', () => {
+        const room = socket.currentRoom;
+        if (!room || !rooms[room]) return;
+        rooms[room].readyCount = (rooms[room].readyCount ?? 0) + 1;
+        if (rooms[room].readyCount >= rooms[room].players.length) {
+            rooms[room].currentTurnIndex = 0;
+            io.to(room).emit('gameStart');
+            setTimeout(() => {
+                if (rooms[room]) io.to(room).emit('turnStart', { playerName: rooms[room].players[0] });
+            }, 4000); // 3s countdown + 1s "Game Started!"
+        }
+    });
+
+    // ── Arrow clicked ─────────────────────────────────────────────────────────
+    socket.on('arrowClicked', ({ arrowIndex }) => {
+        const room = socket.currentRoom;
+        if (room) io.to(room).emit('arrowClicked', { arrowIndex });
+    });
+
+    // ── Free matchmaking ──────────────────────────────────────────────────────
+    socket.on('joinMatchmaking', ({ playerName }) => {
+        socket.playerName = playerName;
+        if (!matchQueue.find(s => s.id === socket.id)) {
+            matchQueue.push(socket);
+        }
+        broadcastQueueUpdate();
+        startMatchTimer();
+    });
+
+    socket.on('leaveMatchmaking', () => {
+        matchQueue = matchQueue.filter(s => s.id !== socket.id);
+        if (matchQueue.length === 0 && matchTimer) {
+            clearInterval(matchTimer); matchTimer = null;
+        }
+    });
+
+    // ── Coin matchmaking (4P) ─────────────────────────────────────────────────
+    socket.on('joinCoinMatch', ({ playerName }) => {
+        socket.playerName = playerName;
+        if (!coinQueue.find(s => s.id === socket.id)) coinQueue.push(socket);
+        broadcastCoinQueueUpdate();
+        if (coinQueue.length >= 4) {
+            const group = coinQueue.splice(0, 4);
+            startCoinMatch(group);
+        }
+    });
+
+    socket.on('leaveCoinMatch', () => {
+        coinQueue = coinQueue.filter(s => s.id !== socket.id);
+        broadcastCoinQueueUpdate();
+    });
+
+    // ── Coin matchmaking (2P) ─────────────────────────────────────────────────
+    socket.on('joinCoinMatch2', ({ playerName }) => {
+        socket.playerName = playerName;
+        if (!coinQueue2.find(s => s.id === socket.id)) coinQueue2.push(socket);
+        broadcastCoinQueue2Update();
+        if (coinQueue2.length >= 2) {
+            const group = coinQueue2.splice(0, 2);
+            startCoinMatch2(group);
+        }
+    });
+
+    socket.on('leaveCoinMatch2', () => {
+        coinQueue2 = coinQueue2.filter(s => s.id !== socket.id);
+        broadcastCoinQueue2Update();
+    });
+
+    // ── Disconnect cleanup ────────────────────────────────────────────────────
+    socket.on('disconnect', () => {
+        console.log('disconnected:', socket.id);
+        matchQueue  = matchQueue.filter(s => s.id !== socket.id);
+        coinQueue   = coinQueue.filter(s => s.id !== socket.id);
+        coinQueue2  = coinQueue2.filter(s => s.id !== socket.id);
+        if (matchQueue.length === 0 && matchTimer) { clearInterval(matchTimer); matchTimer = null; }
+        leaveRoom(socket);
+    });
+});
+
+server.listen(PORT, () => console.log('Server listening on port ' + PORT));
