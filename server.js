@@ -10,16 +10,19 @@ const PORT = process.env.PORT || 3000;
 // ─── State ────────────────────────────────────────────────────────────────────
 const rooms     = {};
 let matchQueue  = [];
-let coinQueue   = [];
-let coinQueue2  = [];
+let coinQueue   = [];   // 4P — 1000 coins (250 each)
+let coinQueue2  = [];   // 2P — 2000 coins (1000 each)
+let coinQueue3  = [];   // 4P — 800 coins  (200 each)
 
 let matchTimer      = null;
 let matchTimeLeft   = 10;
 let coinQueueTimer  = null;
 let coinQueue2Timer = null;
+let coinQueue3Timer = null;
 
 let coinQueueTimeLeft  = 30;
 let coinQueue2TimeLeft = 30;
+let coinQueue3TimeLeft = 30;
 
 const COIN_WAIT_SECONDS = 30;
 
@@ -145,8 +148,8 @@ function startMatchTimer() {
                 const players = group.map(s => s.playerName);
                 const code    = makeRoomCode();
                 setupRoom(code, players, group, players.length);
-                group.forEach(s => s.emit('matchFound', code)); // ← match found FIRST
-                kickoffGame(code);                              // ← countdown AFTER
+                group.forEach(s => s.emit('matchFound', code));
+                kickoffGame(code);
             } else if (matchQueue.length === 1) {
                 matchQueue.splice(0)[0].emit('matchmakingFailed');
             }
@@ -154,7 +157,7 @@ function startMatchTimer() {
     }, 1000);
 }
 
-// ─── Coin matchmaking (4P) ────────────────────────────────────────────────────
+// ─── Coin matchmaking (4P — 1000) ─────────────────────────────────────────────
 function broadcastCoinQueueUpdate(timeLeft) {
     coinQueue.forEach(s => s.emit('coinMatchUpdate', { playerCount: coinQueue.length, timeLeft }));
 }
@@ -174,13 +177,13 @@ function startCoinQueueTimer() {
             while (players.length < 4) players.push('Bot ' + botNum++);
             const code = makeRoomCode();
             setupRoom(code, players, real, 4);
-            real.forEach(s => s.emit('coinMatchFound', code)); // ← match found FIRST
-            kickoffGame(code);                                 // ← countdown AFTER
+            real.forEach(s => s.emit('coinMatchFound', code));
+            kickoffGame(code);
         }
     }, 1000);
 }
 
-// ─── Coin matchmaking (2P) ────────────────────────────────────────────────────
+// ─── Coin matchmaking (2P — 2000) ─────────────────────────────────────────────
 function broadcastCoinQueue2Update(timeLeft) {
     coinQueue2.forEach(s => s.emit('coinMatch2Update', { playerCount: coinQueue2.length, timeLeft }));
 }
@@ -200,8 +203,34 @@ function startCoinQueue2Timer() {
             while (players.length < 2) players.push('Bot ' + botNum++);
             const code = makeRoomCode();
             setupRoom(code, players, real, 2);
-            real.forEach(s => s.emit('coinMatch2Found', code)); // ← match found FIRST
-            kickoffGame(code);                                  // ← countdown AFTER
+            real.forEach(s => s.emit('coinMatch2Found', code));
+            kickoffGame(code);
+        }
+    }, 1000);
+}
+
+// ─── Coin matchmaking (4P — 800) ──────────────────────────────────────────────
+function broadcastCoinQueue3Update(timeLeft) {
+    coinQueue3.forEach(s => s.emit('coinMatch3Update', { playerCount: coinQueue3.length, timeLeft }));
+}
+
+function startCoinQueue3Timer() {
+    if (coinQueue3Timer) return;
+    coinQueue3TimeLeft = COIN_WAIT_SECONDS;
+    coinQueue3Timer = setInterval(() => {
+        coinQueue3TimeLeft--;
+        broadcastCoinQueue3Update(coinQueue3TimeLeft);
+        if (coinQueue3TimeLeft <= 0) {
+            clearInterval(coinQueue3Timer); coinQueue3Timer = null;
+            if (coinQueue3.length === 0) return;
+            const real    = coinQueue3.splice(0);
+            const players = real.map(s => s.playerName);
+            let botNum = 1;
+            while (players.length < 4) players.push('Bot ' + botNum++);
+            const code = makeRoomCode();
+            setupRoom(code, players, real, 4);
+            real.forEach(s => s.emit('coinMatch3Found', code));
+            kickoffGame(code);
         }
     }, 1000);
 }
@@ -243,7 +272,7 @@ io.on('connection', socket => {
         io.to(roomName).emit('playerList', room.players);
 
         if (room.players.length === room.maxPlayers)
-            kickoffGame(roomName); // joinedRoom already sent above, safe to countdown now
+            kickoffGame(roomName);
     });
 
     // LEAVE ROOM
@@ -282,7 +311,7 @@ io.on('connection', socket => {
         if (matchQueue.length === 0 && matchTimer) { clearInterval(matchTimer); matchTimer = null; }
     });
 
-    // COIN MATCHMAKING (4P)
+    // COIN MATCHMAKING (4P — 1000)
     socket.on('joinCoinMatch', ({ playerName }) => {
         socket.playerName = playerName;
         if (!coinQueue.find(s => s.id === socket.id)) coinQueue.push(socket);
@@ -294,8 +323,8 @@ io.on('connection', socket => {
             const players = group.map(s => s.playerName);
             const code    = makeRoomCode();
             setupRoom(code, players, group, 4);
-            group.forEach(s => s.emit('coinMatchFound', code)); // ← FIRST
-            kickoffGame(code);                                  // ← AFTER
+            group.forEach(s => s.emit('coinMatchFound', code));
+            kickoffGame(code);
         } else {
             startCoinQueueTimer();
         }
@@ -310,7 +339,7 @@ io.on('connection', socket => {
         broadcastCoinQueueUpdate(coinQueueTimeLeft);
     });
 
-    // COIN MATCHMAKING (2P)
+    // COIN MATCHMAKING (2P — 2000)
     socket.on('joinCoinMatch2', ({ playerName }) => {
         socket.playerName = playerName;
         if (!coinQueue2.find(s => s.id === socket.id)) coinQueue2.push(socket);
@@ -322,8 +351,8 @@ io.on('connection', socket => {
             const players = group.map(s => s.playerName);
             const code    = makeRoomCode();
             setupRoom(code, players, group, 2);
-            group.forEach(s => s.emit('coinMatch2Found', code)); // ← FIRST
-            kickoffGame(code);                                   // ← AFTER
+            group.forEach(s => s.emit('coinMatch2Found', code));
+            kickoffGame(code);
         } else {
             startCoinQueue2Timer();
         }
@@ -338,15 +367,45 @@ io.on('connection', socket => {
         broadcastCoinQueue2Update(coinQueue2TimeLeft);
     });
 
+    // COIN MATCHMAKING (4P — 800)
+    socket.on('joinCoinMatch3', ({ playerName }) => {
+        socket.playerName = playerName;
+        if (!coinQueue3.find(s => s.id === socket.id)) coinQueue3.push(socket);
+        socket.emit('coinMatch3Update', { playerCount: coinQueue3.length, timeLeft: coinQueue3TimeLeft });
+        broadcastCoinQueue3Update(coinQueue3TimeLeft);
+        if (coinQueue3.length >= 4) {
+            clearInterval(coinQueue3Timer); coinQueue3Timer = null;
+            const group   = coinQueue3.splice(0, 4);
+            const players = group.map(s => s.playerName);
+            const code    = makeRoomCode();
+            setupRoom(code, players, group, 4);
+            group.forEach(s => s.emit('coinMatch3Found', code));
+            kickoffGame(code);
+        } else {
+            startCoinQueue3Timer();
+        }
+    });
+
+    socket.on('leaveCoinMatch3', () => {
+        coinQueue3 = coinQueue3.filter(s => s.id !== socket.id);
+        if (coinQueue3.length === 0 && coinQueue3Timer) {
+            clearInterval(coinQueue3Timer); coinQueue3Timer = null;
+            coinQueue3TimeLeft = COIN_WAIT_SECONDS;
+        }
+        broadcastCoinQueue3Update(coinQueue3TimeLeft);
+    });
+
     // DISCONNECT
     socket.on('disconnect', () => {
         console.log('disconnected:', socket.id);
         matchQueue  = matchQueue.filter(s => s.id !== socket.id);
         coinQueue   = coinQueue.filter(s => s.id !== socket.id);
         coinQueue2  = coinQueue2.filter(s => s.id !== socket.id);
+        coinQueue3  = coinQueue3.filter(s => s.id !== socket.id);
         if (matchQueue.length  === 0 && matchTimer)      { clearInterval(matchTimer);      matchTimer      = null; }
         if (coinQueue.length   === 0 && coinQueueTimer)  { clearInterval(coinQueueTimer);  coinQueueTimer  = null; coinQueueTimeLeft  = COIN_WAIT_SECONDS; }
         if (coinQueue2.length  === 0 && coinQueue2Timer) { clearInterval(coinQueue2Timer); coinQueue2Timer = null; coinQueue2TimeLeft = COIN_WAIT_SECONDS; }
+        if (coinQueue3.length  === 0 && coinQueue3Timer) { clearInterval(coinQueue3Timer); coinQueue3Timer = null; coinQueue3TimeLeft = COIN_WAIT_SECONDS; }
         leaveRoom(socket);
     });
 });
