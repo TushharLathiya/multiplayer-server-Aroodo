@@ -10,15 +10,15 @@ const PORT = process.env.PORT || 3000;
 // ─── State ────────────────────────────────────────────────────────────────────
 const rooms     = {};
 let matchQueue  = [];
-let coinQueue   = [];   // 4P coin party
-let coinQueue2  = [];   // 2P coin party
+let coinQueue   = [];
+let coinQueue2  = [];
 
 let matchTimer      = null;
 let matchTimeLeft   = 10;
 let coinQueueTimer  = null;
 let coinQueue2Timer = null;
 
-let coinQueueTimeLeft  = 30; // track for late-joiners
+let coinQueueTimeLeft  = 30;
 let coinQueue2TimeLeft = 30;
 
 const COIN_WAIT_SECONDS = 30;
@@ -85,7 +85,8 @@ function startRoomGame(roomCode) {
     }, 4000);
 }
 
-function initRoom(code, players, realSockets, maxPlayers) {
+// Step 1: create room + join sockets, send playerList — NO countdown yet
+function setupRoom(code, players, realSockets, maxPlayers) {
     rooms[code] = {
         players:          [...players],
         maxPlayers:       maxPlayers,
@@ -102,6 +103,10 @@ function initRoom(code, players, realSockets, maxPlayers) {
         }
     });
     io.to(code).emit('playerList', players);
+}
+
+// Step 2: send countdown + start game — call AFTER match-found events
+function kickoffGame(code) {
     io.to(code).emit('countdownStart');
     startRoomGame(code);
 }
@@ -139,8 +144,9 @@ function startMatchTimer() {
                 const group   = matchQueue.splice(0);
                 const players = group.map(s => s.playerName);
                 const code    = makeRoomCode();
-                initRoom(code, players, group, players.length);
-                group.forEach(s => s.emit('matchFound', code));
+                setupRoom(code, players, group, players.length);
+                group.forEach(s => s.emit('matchFound', code)); // ← match found FIRST
+                kickoffGame(code);                              // ← countdown AFTER
             } else if (matchQueue.length === 1) {
                 matchQueue.splice(0)[0].emit('matchmakingFailed');
             }
@@ -167,8 +173,9 @@ function startCoinQueueTimer() {
             let botNum = 1;
             while (players.length < 4) players.push('Bot ' + botNum++);
             const code = makeRoomCode();
-            initRoom(code, players, real, 4);
-            real.forEach(s => s.emit('coinMatchFound', code));
+            setupRoom(code, players, real, 4);
+            real.forEach(s => s.emit('coinMatchFound', code)); // ← match found FIRST
+            kickoffGame(code);                                 // ← countdown AFTER
         }
     }, 1000);
 }
@@ -192,8 +199,9 @@ function startCoinQueue2Timer() {
             let botNum = 1;
             while (players.length < 2) players.push('Bot ' + botNum++);
             const code = makeRoomCode();
-            initRoom(code, players, real, 2);
-            real.forEach(s => s.emit('coinMatch2Found', code));
+            setupRoom(code, players, real, 2);
+            real.forEach(s => s.emit('coinMatch2Found', code)); // ← match found FIRST
+            kickoffGame(code);                                  // ← countdown AFTER
         }
     }, 1000);
 }
@@ -234,10 +242,8 @@ io.on('connection', socket => {
         io.to(roomName).emit('playerJoined', playerName);
         io.to(roomName).emit('playerList', room.players);
 
-        if (room.players.length === room.maxPlayers) {
-            io.to(roomName).emit('countdownStart');
-            startRoomGame(roomName);
-        }
+        if (room.players.length === room.maxPlayers)
+            kickoffGame(roomName); // joinedRoom already sent above, safe to countdown now
     });
 
     // LEAVE ROOM
@@ -280,7 +286,6 @@ io.on('connection', socket => {
     socket.on('joinCoinMatch', ({ playerName }) => {
         socket.playerName = playerName;
         if (!coinQueue.find(s => s.id === socket.id)) coinQueue.push(socket);
-        // Send current timeLeft so late-joiners see the right countdown
         socket.emit('coinMatchUpdate', { playerCount: coinQueue.length, timeLeft: coinQueueTimeLeft });
         broadcastCoinQueueUpdate(coinQueueTimeLeft);
         if (coinQueue.length >= 4) {
@@ -288,8 +293,9 @@ io.on('connection', socket => {
             const group   = coinQueue.splice(0, 4);
             const players = group.map(s => s.playerName);
             const code    = makeRoomCode();
-            initRoom(code, players, group, 4);
-            group.forEach(s => s.emit('coinMatchFound', code));
+            setupRoom(code, players, group, 4);
+            group.forEach(s => s.emit('coinMatchFound', code)); // ← FIRST
+            kickoffGame(code);                                  // ← AFTER
         } else {
             startCoinQueueTimer();
         }
@@ -315,8 +321,9 @@ io.on('connection', socket => {
             const group   = coinQueue2.splice(0, 2);
             const players = group.map(s => s.playerName);
             const code    = makeRoomCode();
-            initRoom(code, players, group, 2);
-            group.forEach(s => s.emit('coinMatch2Found', code));
+            setupRoom(code, players, group, 2);
+            group.forEach(s => s.emit('coinMatch2Found', code)); // ← FIRST
+            kickoffGame(code);                                   // ← AFTER
         } else {
             startCoinQueue2Timer();
         }
