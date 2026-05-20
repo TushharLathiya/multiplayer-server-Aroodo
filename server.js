@@ -18,7 +18,10 @@ let matchTimeLeft   = 10;
 let coinQueueTimer  = null;
 let coinQueue2Timer = null;
 
-const COIN_WAIT_SECONDS = 30; // seconds before bots fill empty slots
+let coinQueueTimeLeft  = 30; // track for late-joiners
+let coinQueue2TimeLeft = 30;
+
+const COIN_WAIT_SECONDS = 30;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function makeRoomCode() {
@@ -32,7 +35,6 @@ function isBot(name) {
     return typeof name === 'string' && name.startsWith('Bot ');
 }
 
-// Advance to next turn; auto-plays if next player is a bot
 function advanceTurn(roomCode) {
     const room = rooms[roomCode];
     if (!room || room.players.length === 0) return;
@@ -46,19 +48,16 @@ function advanceTurn(roomCode) {
     if (isBot(nextPlayer)) scheduleBotPlay(roomCode, nextPlayer);
 }
 
-// Bot "thinks" 1.5s, picks a random arrow, waits for animation, then advances turn
 function scheduleBotPlay(roomCode, botName) {
     setTimeout(() => {
         const room = rooms[roomCode];
         if (!room) return;
-        // Make sure it's still this bot's turn
         if (room.players[room.currentTurnIndex] !== botName) return;
 
         const arrowCount = room.arrowCount || 8;
         const arrowIndex = Math.floor(Math.random() * arrowCount);
         io.to(roomCode).emit('arrowClicked', { arrowIndex });
 
-        // Wait for arrow move + reverse animation (~6s), then next turn
         setTimeout(() => {
             const r = rooms[roomCode];
             if (!r) return;
@@ -66,17 +65,14 @@ function scheduleBotPlay(roomCode, botName) {
             advanceTurn(roomCode);
         }, 6000);
 
-    }, 1500); // thinking delay
+    }, 1500);
 }
 
-// Countdown → gameStart → first turnStart
 function startRoomGame(roomCode) {
-    // 4s after countdownStart (3s countdown + 1s "Game Started!")
     setTimeout(() => {
         if (!rooms[roomCode]) return;
         io.to(roomCode).emit('gameStart');
 
-        // 1 extra second for clients to instantiate the level
         setTimeout(() => {
             const room = rooms[roomCode];
             if (!room) return;
@@ -89,18 +85,17 @@ function startRoomGame(roomCode) {
     }, 4000);
 }
 
-// Create a room with real + bot players, then start the game
 function initRoom(code, players, realSockets, maxPlayers) {
     rooms[code] = {
-        players:           [...players],
-        maxPlayers:        maxPlayers,
-        sockets:           {},
-        bots:              players.filter(isBot),
-        arrowCount:        0,
-        currentTurnIndex:  0,
+        players:          [...players],
+        maxPlayers:       maxPlayers,
+        sockets:          {},
+        bots:             players.filter(isBot),
+        arrowCount:       0,
+        currentTurnIndex: 0,
     };
     realSockets.forEach(s => {
-        if (s && s.join) {           // guard: real socket only
+        if (s && s.join) {
             s.join(code);
             s.currentRoom = code;
             rooms[code].sockets[s.playerName] = s;
@@ -120,7 +115,7 @@ function leaveRoom(socket) {
     socket.leave(room);
     socket.currentRoom = null;
     if (rooms[room].players.filter(p => !isBot(p)).length === 0) {
-        delete rooms[room]; // everyone real has left
+        delete rooms[room];
     } else {
         io.to(room).emit('playerLeft', playerName);
         io.to(room).emit('playerList', rooms[room].players);
@@ -141,9 +136,9 @@ function startMatchTimer() {
         if (matchTimeLeft <= 0) {
             clearInterval(matchTimer); matchTimer = null;
             if (matchQueue.length >= 2) {
-                const group = matchQueue.splice(0);
+                const group   = matchQueue.splice(0);
                 const players = group.map(s => s.playerName);
-                const code = makeRoomCode();
+                const code    = makeRoomCode();
                 initRoom(code, players, group, players.length);
                 group.forEach(s => s.emit('matchFound', code));
             } else if (matchQueue.length === 1) {
@@ -154,16 +149,17 @@ function startMatchTimer() {
 }
 
 // ─── Coin matchmaking (4P) ────────────────────────────────────────────────────
-function broadcastCoinQueueUpdate() {
-    coinQueue.forEach(s => s.emit('coinMatchUpdate', { playerCount: coinQueue.length }));
+function broadcastCoinQueueUpdate(timeLeft) {
+    coinQueue.forEach(s => s.emit('coinMatchUpdate', { playerCount: coinQueue.length, timeLeft }));
 }
 
 function startCoinQueueTimer() {
     if (coinQueueTimer) return;
-    let remaining = COIN_WAIT_SECONDS;
+    coinQueueTimeLeft = COIN_WAIT_SECONDS;
     coinQueueTimer = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) {
+        coinQueueTimeLeft--;
+        broadcastCoinQueueUpdate(coinQueueTimeLeft);
+        if (coinQueueTimeLeft <= 0) {
             clearInterval(coinQueueTimer); coinQueueTimer = null;
             if (coinQueue.length === 0) return;
             const real    = coinQueue.splice(0);
@@ -178,16 +174,17 @@ function startCoinQueueTimer() {
 }
 
 // ─── Coin matchmaking (2P) ────────────────────────────────────────────────────
-function broadcastCoinQueue2Update() {
-    coinQueue2.forEach(s => s.emit('coinMatch2Update', { playerCount: coinQueue2.length }));
+function broadcastCoinQueue2Update(timeLeft) {
+    coinQueue2.forEach(s => s.emit('coinMatch2Update', { playerCount: coinQueue2.length, timeLeft }));
 }
 
 function startCoinQueue2Timer() {
     if (coinQueue2Timer) return;
-    let remaining = COIN_WAIT_SECONDS;
+    coinQueue2TimeLeft = COIN_WAIT_SECONDS;
     coinQueue2Timer = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) {
+        coinQueue2TimeLeft--;
+        broadcastCoinQueue2Update(coinQueue2TimeLeft);
+        if (coinQueue2TimeLeft <= 0) {
             clearInterval(coinQueue2Timer); coinQueue2Timer = null;
             if (coinQueue2.length === 0) return;
             const real    = coinQueue2.splice(0);
@@ -224,7 +221,7 @@ io.on('connection', socket => {
     // JOIN ROOM
     socket.on('joinRoom', ({ roomName, playerName }) => {
         const room = rooms[roomName];
-        if (!room)                               { socket.emit('roomNotFound'); return; }
+        if (!room)                                  { socket.emit('roomNotFound'); return; }
         if (room.players.length >= room.maxPlayers) { socket.emit('roomFull');    return; }
 
         socket.playerName  = playerName;
@@ -246,7 +243,7 @@ io.on('connection', socket => {
     // LEAVE ROOM
     socket.on('leaveRoom', () => leaveRoom(socket));
 
-    // ARROW COUNT (client reports after level loads — used for bot clicks)
+    // ARROW COUNT
     socket.on('arrowCount', ({ count }) => {
         const room = socket.currentRoom;
         if (room && rooms[room] && count > 0)
@@ -259,7 +256,7 @@ io.on('connection', socket => {
         if (room) io.to(room).emit('arrowClicked', { arrowIndex });
     });
 
-    // TURN DONE (real player finished animation)
+    // TURN DONE
     socket.on('turnDone', () => {
         const room = socket.currentRoom;
         if (!room || !rooms[room]) return;
@@ -283,7 +280,9 @@ io.on('connection', socket => {
     socket.on('joinCoinMatch', ({ playerName }) => {
         socket.playerName = playerName;
         if (!coinQueue.find(s => s.id === socket.id)) coinQueue.push(socket);
-        broadcastCoinQueueUpdate();
+        // Send current timeLeft so late-joiners see the right countdown
+        socket.emit('coinMatchUpdate', { playerCount: coinQueue.length, timeLeft: coinQueueTimeLeft });
+        broadcastCoinQueueUpdate(coinQueueTimeLeft);
         if (coinQueue.length >= 4) {
             clearInterval(coinQueueTimer); coinQueueTimer = null;
             const group   = coinQueue.splice(0, 4);
@@ -298,15 +297,19 @@ io.on('connection', socket => {
 
     socket.on('leaveCoinMatch', () => {
         coinQueue = coinQueue.filter(s => s.id !== socket.id);
-        if (coinQueue.length === 0 && coinQueueTimer) { clearInterval(coinQueueTimer); coinQueueTimer = null; }
-        broadcastCoinQueueUpdate();
+        if (coinQueue.length === 0 && coinQueueTimer) {
+            clearInterval(coinQueueTimer); coinQueueTimer = null;
+            coinQueueTimeLeft = COIN_WAIT_SECONDS;
+        }
+        broadcastCoinQueueUpdate(coinQueueTimeLeft);
     });
 
     // COIN MATCHMAKING (2P)
     socket.on('joinCoinMatch2', ({ playerName }) => {
         socket.playerName = playerName;
         if (!coinQueue2.find(s => s.id === socket.id)) coinQueue2.push(socket);
-        broadcastCoinQueue2Update();
+        socket.emit('coinMatch2Update', { playerCount: coinQueue2.length, timeLeft: coinQueue2TimeLeft });
+        broadcastCoinQueue2Update(coinQueue2TimeLeft);
         if (coinQueue2.length >= 2) {
             clearInterval(coinQueue2Timer); coinQueue2Timer = null;
             const group   = coinQueue2.splice(0, 2);
@@ -321,8 +324,11 @@ io.on('connection', socket => {
 
     socket.on('leaveCoinMatch2', () => {
         coinQueue2 = coinQueue2.filter(s => s.id !== socket.id);
-        if (coinQueue2.length === 0 && coinQueue2Timer) { clearInterval(coinQueue2Timer); coinQueue2Timer = null; }
-        broadcastCoinQueue2Update();
+        if (coinQueue2.length === 0 && coinQueue2Timer) {
+            clearInterval(coinQueue2Timer); coinQueue2Timer = null;
+            coinQueue2TimeLeft = COIN_WAIT_SECONDS;
+        }
+        broadcastCoinQueue2Update(coinQueue2TimeLeft);
     });
 
     // DISCONNECT
@@ -332,8 +338,8 @@ io.on('connection', socket => {
         coinQueue   = coinQueue.filter(s => s.id !== socket.id);
         coinQueue2  = coinQueue2.filter(s => s.id !== socket.id);
         if (matchQueue.length  === 0 && matchTimer)      { clearInterval(matchTimer);      matchTimer      = null; }
-        if (coinQueue.length   === 0 && coinQueueTimer)  { clearInterval(coinQueueTimer);  coinQueueTimer  = null; }
-        if (coinQueue2.length  === 0 && coinQueue2Timer) { clearInterval(coinQueue2Timer); coinQueue2Timer = null; }
+        if (coinQueue.length   === 0 && coinQueueTimer)  { clearInterval(coinQueueTimer);  coinQueueTimer  = null; coinQueueTimeLeft  = COIN_WAIT_SECONDS; }
+        if (coinQueue2.length  === 0 && coinQueue2Timer) { clearInterval(coinQueue2Timer); coinQueue2Timer = null; coinQueue2TimeLeft = COIN_WAIT_SECONDS; }
         leaveRoom(socket);
     });
 });
