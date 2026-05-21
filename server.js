@@ -1,13 +1,14 @@
 'use strict';
 
 const http = require('http');
-const socket = require('socket.io');
+const { Server } = require('socket.io');
 const server = http.createServer();
-const port = 11100;
+const port = process.env.PORT || 11100;
 
-var io = socket(server, {
+const io = new Server(server, {
     pingInterval: 10000,
-    pingTimeout: 5000
+    pingTimeout: 5000,
+    cors: { origin: "*" }
 });
 
 io.use((socket, next) => {
@@ -31,7 +32,6 @@ function isBot(name) {
     return name.startsWith('Bot ');
 }
 
-// Build room, assign players, emit playerList — but do NOT start countdown yet
 function setupRoom(playerSockets, roomCode, maxPlayers) {
     const playerNames = playerSockets.map(s => s.playerName);
     rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10 };
@@ -44,7 +44,6 @@ function setupRoom(playerSockets, roomCode, maxPlayers) {
     io.to(roomCode).emit('playerList', playerNames);
 }
 
-// Emit countdownStart then start the game sequence
 function kickoffGame(roomCode) {
     io.to(roomCode).emit('countdownStart');
     setTimeout(() => startRoomGame(roomCode), 4000);
@@ -78,11 +77,10 @@ function scheduleBotPlay(roomCode, botName) {
         const arrowIndex = Math.floor(Math.random() * arrowCount);
         io.to(roomCode).emit('arrowClicked', { arrowIndex });
 
-        // Fallback: if no real player sent turnDone within 6s, advance ourselves
         setTimeout(() => {
             const rr = rooms[roomCode];
             if (!rr) return;
-            if (rr.players[rr.currentTurnIndex] !== botName) return; // already advanced
+            if (rr.players[rr.currentTurnIndex] !== botName) return;
             advanceTurn(roomCode);
         }, 6000);
     }, 1500);
@@ -99,7 +97,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
     }
 
     function startTimer() {
-        if (state.timer) return; // already running
+        if (state.timer) return;
         state.timeLeft = COIN_WAIT_SECONDS;
         state.timer = setInterval(() => {
             state.timeLeft--;
@@ -117,17 +115,12 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
         while (queue.length < maxPlayers) {
             queue.push({ playerName: 'Bot ' + botNum++, isFake: true });
         }
-
         const roomCode = generateCode();
         const realSockets = queue.filter(s => !s.isFake);
         const allSockets  = [...queue];
-
-        // Emit match-found FIRST, then clear queue
         realSockets.forEach(s => s.emit(foundEvent, roomCode));
-
         queue.length = 0;
         state.timeLeft = COIN_WAIT_SECONDS;
-
         setupRoom(allSockets, roomCode, maxPlayers);
         kickoffGame(roomCode);
     }
@@ -136,21 +129,16 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
         if (queue.find(s => s.id === socket.id)) return;
         socket.playerName = socket.handshake.query.playerName || socket.playerName || 'Player';
         queue.push(socket);
-
-        // Send current state immediately to the joining socket
         socket.emit(updateEvent, { playerCount: queue.length, timeLeft: state.timeLeft });
         broadcast();
-
         if (queue.length >= maxPlayers) {
             clearInterval(state.timer);
             state.timer = null;
-
             const roomCode = generateCode();
             const snap = [...queue];
             snap.forEach(s => s.emit(foundEvent, roomCode));
             queue.length = 0;
             state.timeLeft = COIN_WAIT_SECONDS;
-
             setupRoom(snap, roomCode, maxPlayers);
             kickoffGame(roomCode);
         } else {
@@ -212,7 +200,7 @@ const h7  = makeCoinQueueHandler(coinQueue7,  cq7,  'coinMatch7Update',  'coinMa
 const h8  = makeCoinQueueHandler(coinQueue8,  cq8,  'coinMatch8Update',  'coinMatch8Found',  2);
 const h9  = makeCoinQueueHandler(coinQueue9,  cq9,  'coinMatch9Update',  'coinMatch9Found',  2);
 
-// ─── MATCHMAKING (free, no coins) ────────────────────────────────────────────
+// ─── MATCHMAKING (free) ───────────────────────────────────────────────────────
 
 const matchmakingQueue = [];
 let matchmakingTimer = null;
@@ -302,14 +290,12 @@ io.on('connection', socket => {
         const r = rooms[roomName];
         if (!r) { socket.emit('roomNotFound'); return; }
         if (r.players.length >= r.maxPlayers) { socket.emit('roomFull'); return; }
-
         r.players.push(playerName);
         playerRoom[socket.id] = roomName;
         socket.join(roomName);
         socket.emit('joinedRoom', roomName);
         io.to(roomName).emit('playerList', r.players);
         io.to(roomName).emit('playerJoined', playerName);
-
         if (r.players.length >= r.maxPlayers) kickoffGame(roomName);
     });
 
@@ -397,23 +383,19 @@ io.on('connection', socket => {
     socket.on('disconnect', () => {
         console.log('disconnect', socket.id);
 
-        // Free matchmaking cleanup
         const mIdx = matchmakingQueue.findIndex(s => s.id === socket.id);
         if (mIdx !== -1) matchmakingQueue.splice(mIdx, 1);
 
-        // 4P coin queue cleanup
+        // 4P
         h1.cleanup(socket); h3.cleanup(socket); h4.cleanup(socket);
         h5.cleanup(socket); h6.cleanup(socket);
-
-        // 3P coin queue cleanup
+        // 3P
         h10.cleanup(socket); h11.cleanup(socket);
         h12.cleanup(socket); h13.cleanup(socket);
-
-        // 2P coin queue cleanup
+        // 2P
         h2.cleanup(socket); h7.cleanup(socket);
         h8.cleanup(socket); h9.cleanup(socket);
 
-        // Room cleanup
         const roomCode = playerRoom[socket.id];
         if (roomCode) {
             const r = rooms[roomCode];
@@ -425,23 +407,6 @@ io.on('connection', socket => {
             }
             delete playerRoom[socket.id];
         }
-    });
-
-    // ── Legacy sample events ──────────────────────────────────────────────────
-
-    socket.on('hello', data => {
-        console.log('hello', data);
-        socket.emit('hello', { date: new Date().getTime(), data });
-    });
-
-    socket.on('spin', data => {
-        console.log('spin');
-        socket.emit('spin', { date: new Date().getTime(), data });
-    });
-
-    socket.on('class', data => {
-        console.log('class', data);
-        socket.emit('class', { date: new Date().getTime(), data });
     });
 });
 
