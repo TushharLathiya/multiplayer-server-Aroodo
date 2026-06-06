@@ -4,7 +4,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const port = process.env.PORT || 11100;
 
-// ← Health check handler fixes the 502
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Aroodo Multiplayer Server is running.');
@@ -24,7 +23,7 @@ io.use((socket, next) => {
     }
 });
 
-// ─── ROOM HELPERS ────────────────────────────────────────────────────────────
+// ─── ROOM HELPERS ─────────────────────────────────────────────────────
 
 const rooms = {};
 const playerRoom = {};
@@ -87,14 +86,17 @@ function scheduleBotPlay(roomCode, botName) {
     }, 1500);
 }
 
+
 // ─── COIN QUEUE FACTORY ───────────────────────────────────────────────────────
 
 const COIN_WAIT_SECONDS = 30;
 
 function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers) {
+
     function broadcast() {
         queue.forEach(s => s.emit(updateEvent, { playerCount: queue.length, timeLeft: state.timeLeft }));
     }
+
     function startTimer() {
         if (state.timer) return;
         state.timeLeft = COIN_WAIT_SECONDS;
@@ -108,6 +110,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
             }
         }, 1000);
     }
+
     function fillWithBotsAndStart() {
         let botNum = 1;
         while (queue.length < maxPlayers)
@@ -121,6 +124,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
         setupRoom(allSockets, roomCode, maxPlayers);
         kickoffGame(roomCode);
     }
+
     function join(socket) {
         if (queue.find(s => s.id === socket.id)) return;
         socket.playerName = socket.handshake.query.playerName || socket.playerName || 'Player';
@@ -141,6 +145,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
             startTimer();
         }
     }
+
     function leave(socket) {
         const idx = queue.findIndex(s => s.id === socket.id);
         if (idx !== -1) queue.splice(idx, 1);
@@ -150,6 +155,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
             state.timeLeft = COIN_WAIT_SECONDS;
         } else { broadcast(); }
     }
+
     function cleanup(socket) { leave(socket); }
     return { join, leave, cleanup };
 }
@@ -247,31 +253,52 @@ io.on('connection', socket => {
         if (matchmakingQueue.length === 0) { clearInterval(matchmakingTimer); matchmakingTimer = null; matchmakingTimeLeft = MATCHMAKING_WAIT; }
     });
 
+    // ── FRIEND ROOM — CREATE ──────────────────────────────────────────────────
+
     socket.on('createRoom', data => {
-        const { playerName, playerCount } = data;
+        const { playerName, playerCount, coinAmount = 0 } = data;
         socket.playerName = playerName;
         const roomCode = generateCode();
-        rooms[roomCode] = { players: [playerName], maxPlayers: playerCount || 4, currentTurnIndex: 0, arrowCount: 10 };
+
+        rooms[roomCode] = {
+            players:          [playerName],
+            maxPlayers:       playerCount || 4,
+            currentTurnIndex: 0,
+            arrowCount:       10,
+            coinAmount:       parseInt(coinAmount) || 0   // ← store coin amount
+        };
+
         playerRoom[socket.id] = roomCode;
         socket.join(roomCode);
-        socket.emit('roomCreated', roomCode);
+
+        // Send object so Unity client gets coinAmount back
+        socket.emit('roomCreated', JSON.stringify({ code: roomCode, coinAmount: rooms[roomCode].coinAmount }));
         io.to(roomCode).emit('playerList', rooms[roomCode].players);
     });
+
+    // ── FRIEND ROOM — JOIN ────────────────────────────────────────────────────
 
     socket.on('joinRoom', data => {
         const { roomName, playerName } = data;
         socket.playerName = playerName;
         const r = rooms[roomName];
-        if (!r) { socket.emit('roomNotFound'); return; }
-        if (r.players.length >= r.maxPlayers) { socket.emit('roomFull'); return; }
+
+        if (!r)                          { socket.emit('roomNotFound'); return; }
+        if (r.players.length >= r.maxPlayers) { socket.emit('roomFull');    return; }
+
         r.players.push(playerName);
         playerRoom[socket.id] = roomName;
         socket.join(roomName);
-        socket.emit('joinedRoom', roomName);
+
+        // Send object so Unity client gets coinAmount back
+        socket.emit('joinedRoom', JSON.stringify({ code: roomName, coinAmount: r.coinAmount || 0 }));
         io.to(roomName).emit('playerList', r.players);
         io.to(roomName).emit('playerJoined', playerName);
+
         if (r.players.length >= r.maxPlayers) kickoffGame(roomName);
     });
+
+    // ── COIN QUEUES ───────────────────────────────────────────────────────────
 
     // 4-player coin queues
     socket.on('joinCoinMatch',  d => { socket.playerName = d.playerName; h1.join(socket); });
@@ -305,19 +332,23 @@ io.on('connection', socket => {
     socket.on('joinCoinMatch9',  d => { socket.playerName = d.playerName; h9.join(socket); });
     socket.on('leaveCoinMatch9', () => h9.leave(socket));
 
-    // In-game
+    // ── IN-GAME ───────────────────────────────────────────────────────────────
+
     socket.on('arrowCount', data => {
         const rc = playerRoom[socket.id];
         if (rc && rooms[rc]) rooms[rc].arrowCount = data.count;
     });
+
     socket.on('arrowClicked', data => {
         const rc = playerRoom[socket.id];
         if (rc) io.to(rc).emit('arrowClicked', { arrowIndex: data.arrowIndex });
     });
+
     socket.on('turnDone', () => {
         const rc = playerRoom[socket.id];
         if (rc) advanceTurn(rc);
     });
+
     socket.on('leaveRoom', () => {
         const rc = playerRoom[socket.id];
         if (!rc) return;
