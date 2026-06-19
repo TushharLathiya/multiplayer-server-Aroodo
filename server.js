@@ -72,18 +72,15 @@ function advanceTurn(roomCode) {
 }
 
 function scheduleBotPlay(roomCode, botName) {
+    // The delegate client now picks the arrow (easy = random, medium = strategic)
+    // and sends arrowClicked itself — we no longer auto-click here.
+    // We only keep a fallback: if the delegate fails to act within 15 s, skip the turn.
     setTimeout(() => {
         const r = rooms[roomCode];
         if (!r) return;
-        const arrowIndex = Math.floor(Math.random() * (r.arrowCount || 10));
-        io.to(roomCode).emit('arrowClicked', { arrowIndex });
-        setTimeout(() => {
-            const rr = rooms[roomCode];
-            if (!rr) return;
-            if (rr.players[rr.currentTurnIndex] !== botName) return;
-            advanceTurn(roomCode);
-        }, 6000);
-    }, 1500);
+        if (r.players[r.currentTurnIndex] !== botName) return; // delegate already handled it
+        advanceTurn(roomCode); // fallback: delegate timed out or disconnected
+    }, 15000);
 }
 
 
