@@ -34,16 +34,19 @@ function generateCode() {
 
 function isBot(name) { return name.startsWith('Bot '); }
 
+// playerSockets: array of sockets (or fake bot stand-ins) each carrying
+// .playerName and .profileNo. Builds rooms[roomCode].players as
+// { name, profileNo } objects so clients can show real profile pictures.
 function setupRoom(playerSockets, roomCode, maxPlayers) {
-    const playerNames = playerSockets.map(s => s.playerName);
-    rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10 };
+    const players = playerSockets.map(s => ({ name: s.playerName, profileNo: s.profileNo || 0 }));
+    rooms[roomCode] = { players, maxPlayers, currentTurnIndex: 0, arrowCount: 10 };
     playerSockets.forEach(s => {
         if (!s.isFake) {
             playerRoom[s.id] = roomCode;
             s.join(roomCode);
         }
     });
-    io.to(roomCode).emit('playerList', playerNames);
+    io.to(roomCode).emit('playerList', players);
 }
 
 function kickoffGame(roomCode) {
@@ -57,8 +60,8 @@ function startRoomGame(roomCode) {
         const r = rooms[roomCode];
         if (!r) return;
         const firstPlayer = r.players[r.currentTurnIndex];
-        io.to(roomCode).emit('turnStart', { playerName: firstPlayer });
-        if (isBot(firstPlayer)) scheduleBotPlay(roomCode, firstPlayer);
+        io.to(roomCode).emit('turnStart', { playerName: firstPlayer.name });
+        if (isBot(firstPlayer.name)) scheduleBotPlay(roomCode, firstPlayer.name);
     }, 1000);
 }
 
@@ -67,8 +70,8 @@ function advanceTurn(roomCode) {
     if (!r) return;
     r.currentTurnIndex = (r.currentTurnIndex + 1) % r.players.length;
     const nextPlayer = r.players[r.currentTurnIndex];
-    io.to(roomCode).emit('turnStart', { playerName: nextPlayer });
-    if (isBot(nextPlayer)) scheduleBotPlay(roomCode, nextPlayer);
+    io.to(roomCode).emit('turnStart', { playerName: nextPlayer.name });
+    if (isBot(nextPlayer.name)) scheduleBotPlay(roomCode, nextPlayer.name);
 }
 
 function scheduleBotPlay(roomCode, botName) {
@@ -78,7 +81,7 @@ function scheduleBotPlay(roomCode, botName) {
     setTimeout(() => {
         const r = rooms[roomCode];
         if (!r) return;
-        if (r.players[r.currentTurnIndex] !== botName) return; // delegate already handled it
+        if (r.players[r.currentTurnIndex].name !== botName) return; // delegate already handled it
         advanceTurn(roomCode); // fallback: delegate timed out or disconnected
     }, 15000);
 }
@@ -111,7 +114,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
     function fillWithBotsAndStart() {
         let botNum = 1;
         while (queue.length < maxPlayers)
-            queue.push({ playerName: 'Bot ' + botNum++, isFake: true });
+            queue.push({ playerName: 'Bot ' + botNum++, isFake: true, profileNo: 0 });
         const roomCode = generateCode();
         const realSockets = queue.filter(s => !s.isFake);
         const allSockets = [...queue];
@@ -125,6 +128,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
     function join(socket) {
         if (queue.find(s => s.id === socket.id)) return;
         socket.playerName = socket.handshake.query.playerName || socket.playerName || 'Player';
+        socket.profileNo  = socket.profileNo || 0;
         queue.push(socket);
         socket.emit(updateEvent, { playerCount: queue.length, timeLeft: state.timeLeft });
         broadcast();
@@ -235,6 +239,7 @@ io.on('connection', socket => {
 
     socket.on('joinMatchmaking', data => {
         socket.playerName = data.playerName;
+        socket.profileNo  = data.profileNo || 0;
         if (matchmakingQueue.find(s => s.id === socket.id)) return;
         matchmakingQueue.push(socket);
         matchmakingQueue.forEach(s =>
@@ -253,12 +258,13 @@ io.on('connection', socket => {
     // ── FRIEND ROOM — CREATE ──────────────────────────────────────────────────
 
     socket.on('createRoom', data => {
-        const { playerName, playerCount, coinAmount = 0 } = data;
+        const { playerName, playerCount, coinAmount = 0, profileNo = 0 } = data;
         socket.playerName = playerName;
+        socket.profileNo  = profileNo;
         const roomCode = generateCode();
 
         rooms[roomCode] = {
-            players:          [playerName],
+            players:          [{ name: playerName, profileNo }],
             maxPlayers:       playerCount || 4,
             currentTurnIndex: 0,
             arrowCount:       10,
@@ -276,14 +282,15 @@ io.on('connection', socket => {
     // ── FRIEND ROOM — JOIN ────────────────────────────────────────────────────
 
     socket.on('joinRoom', data => {
-        const { roomName, playerName } = data;
+        const { roomName, playerName, profileNo = 0 } = data;
         socket.playerName = playerName;
+        socket.profileNo  = profileNo;
         const r = rooms[roomName];
 
         if (!r)                          { socket.emit('roomNotFound'); return; }
         if (r.players.length >= r.maxPlayers) { socket.emit('roomFull');    return; }
 
-        r.players.push(playerName);
+        r.players.push({ name: playerName, profileNo });
         playerRoom[socket.id] = roomName;
         socket.join(roomName);
 
@@ -298,35 +305,35 @@ io.on('connection', socket => {
     // ── COIN QUEUES ───────────────────────────────────────────────────────────
 
     // 4-player coin queues
-    socket.on('joinCoinMatch',  d => { socket.playerName = d.playerName; h1.join(socket); });
+    socket.on('joinCoinMatch',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h1.join(socket); });
     socket.on('leaveCoinMatch', () => h1.leave(socket));
-    socket.on('joinCoinMatch3',  d => { socket.playerName = d.playerName; h3.join(socket); });
+    socket.on('joinCoinMatch3',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h3.join(socket); });
     socket.on('leaveCoinMatch3', () => h3.leave(socket));
-    socket.on('joinCoinMatch4',  d => { socket.playerName = d.playerName; h4.join(socket); });
+    socket.on('joinCoinMatch4',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h4.join(socket); });
     socket.on('leaveCoinMatch4', () => h4.leave(socket));
-    socket.on('joinCoinMatch5',  d => { socket.playerName = d.playerName; h5.join(socket); });
+    socket.on('joinCoinMatch5',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h5.join(socket); });
     socket.on('leaveCoinMatch5', () => h5.leave(socket));
-    socket.on('joinCoinMatch6',  d => { socket.playerName = d.playerName; h6.join(socket); });
+    socket.on('joinCoinMatch6',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h6.join(socket); });
     socket.on('leaveCoinMatch6', () => h6.leave(socket));
 
     // 3-player coin queues
-    socket.on('joinCoinMatch10',  d => { socket.playerName = d.playerName; h10.join(socket); });
+    socket.on('joinCoinMatch10',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h10.join(socket); });
     socket.on('leaveCoinMatch10', () => h10.leave(socket));
-    socket.on('joinCoinMatch11',  d => { socket.playerName = d.playerName; h11.join(socket); });
+    socket.on('joinCoinMatch11',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h11.join(socket); });
     socket.on('leaveCoinMatch11', () => h11.leave(socket));
-    socket.on('joinCoinMatch12',  d => { socket.playerName = d.playerName; h12.join(socket); });
+    socket.on('joinCoinMatch12',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h12.join(socket); });
     socket.on('leaveCoinMatch12', () => h12.leave(socket));
-    socket.on('joinCoinMatch13',  d => { socket.playerName = d.playerName; h13.join(socket); });
+    socket.on('joinCoinMatch13',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h13.join(socket); });
     socket.on('leaveCoinMatch13', () => h13.leave(socket));
 
     // 2-player coin queues
-    socket.on('joinCoinMatch2',  d => { socket.playerName = d.playerName; h2.join(socket); });
+    socket.on('joinCoinMatch2',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h2.join(socket); });
     socket.on('leaveCoinMatch2', () => h2.leave(socket));
-    socket.on('joinCoinMatch7',  d => { socket.playerName = d.playerName; h7.join(socket); });
+    socket.on('joinCoinMatch7',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h7.join(socket); });
     socket.on('leaveCoinMatch7', () => h7.leave(socket));
-    socket.on('joinCoinMatch8',  d => { socket.playerName = d.playerName; h8.join(socket); });
+    socket.on('joinCoinMatch8',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h8.join(socket); });
     socket.on('leaveCoinMatch8', () => h8.leave(socket));
-    socket.on('joinCoinMatch9',  d => { socket.playerName = d.playerName; h9.join(socket); });
+    socket.on('joinCoinMatch9',  d => { socket.playerName = d.playerName; socket.profileNo = d.profileNo || 0; h9.join(socket); });
     socket.on('leaveCoinMatch9', () => h9.leave(socket));
 
     // ── IN-GAME ───────────────────────────────────────────────────────────────
@@ -352,7 +359,7 @@ io.on('connection', socket => {
         const r = rooms[rc];
         if (r) {
             io.to(rc).emit('playerLeft', socket.playerName);
-            r.players = r.players.filter(p => p !== socket.playerName);
+            r.players = r.players.filter(p => p.name !== socket.playerName);
             if (r.players.length === 0) delete rooms[rc];
             else io.to(rc).emit('playerList', r.players);
         }
@@ -375,7 +382,7 @@ io.on('connection', socket => {
             const r = rooms[rc];
             if (r) {
                 io.to(rc).emit('playerLeft', socket.playerName);
-                r.players = r.players.filter(p => p !== socket.playerName);
+                r.players = r.players.filter(p => p.name !== socket.playerName);
                 if (r.players.length === 0) delete rooms[rc];
                 else io.to(rc).emit('playerList', r.players);
             }
