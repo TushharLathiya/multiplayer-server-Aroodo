@@ -36,7 +36,9 @@ function isBot(name) { return name.startsWith('Bot '); }
 
 function setupRoom(playerSockets, roomCode, maxPlayers) {
     const playerNames = playerSockets.map(s => s.playerName);
-    rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10 };
+    const profiles = {};
+    playerSockets.forEach(s => { profiles[s.playerName] = s.profileNumber || 0; });
+    rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10, profiles };
     playerSockets.forEach(s => {
         if (!s.isFake) {
             playerRoom[s.id] = roomCode;
@@ -44,6 +46,7 @@ function setupRoom(playerSockets, roomCode, maxPlayers) {
         }
     });
     io.to(roomCode).emit('playerList', playerNames);
+    io.to(roomCode).emit('playerProfiles', profiles);
 }
 
 function kickoffGame(roomCode) {
@@ -111,7 +114,7 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
     function fillWithBotsAndStart() {
         let botNum = 1;
         while (queue.length < maxPlayers)
-            queue.push({ playerName: 'Bot ' + botNum++, isFake: true });
+            queue.push({ playerName: 'Bot ' + botNum++, isFake: true, profileNumber: 0 });
         const roomCode = generateCode();
         const realSockets = queue.filter(s => !s.isFake);
         const allSockets = [...queue];
@@ -159,37 +162,37 @@ function makeCoinQueueHandler(queue, state, updateEvent, foundEvent, maxPlayers)
 
 // ─── COIN QUEUES ─────────────────────────────────────────────────────────────
 
-const coinQueue  = []; const cq1  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue3 = []; const cq3  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue4 = []; const cq4  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue5 = []; const cq5  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue6 = []; const cq6  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
+const coinQueue = []; const cq1 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue3 = []; const cq3 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue4 = []; const cq4 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue5 = []; const cq5 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue6 = []; const cq6 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
 
-const coinQueue10 = []; const cq10 = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue11 = []; const cq11 = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue12 = []; const cq12 = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue13 = []; const cq13 = { timer:null, timeLeft:COIN_WAIT_SECONDS };
+const coinQueue10 = []; const cq10 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue11 = []; const cq11 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue12 = []; const cq12 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue13 = []; const cq13 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
 
-const coinQueue2 = []; const cq2  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue7 = []; const cq7  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue8 = []; const cq8  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
-const coinQueue9 = []; const cq9  = { timer:null, timeLeft:COIN_WAIT_SECONDS };
+const coinQueue2 = []; const cq2 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue7 = []; const cq7 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue8 = []; const cq8 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
+const coinQueue9 = []; const cq9 = { timer: null, timeLeft: COIN_WAIT_SECONDS };
 
-const h1  = makeCoinQueueHandler(coinQueue,   cq1,  'coinMatchUpdate',   'coinMatchFound',   4);
-const h3  = makeCoinQueueHandler(coinQueue3,  cq3,  'coinMatch3Update',  'coinMatch3Found',  4);
-const h4  = makeCoinQueueHandler(coinQueue4,  cq4,  'coinMatch4Update',  'coinMatch4Found',  4);
-const h5  = makeCoinQueueHandler(coinQueue5,  cq5,  'coinMatch5Update',  'coinMatch5Found',  4);
-const h6  = makeCoinQueueHandler(coinQueue6,  cq6,  'coinMatch6Update',  'coinMatch6Found',  4);
+const h1 = makeCoinQueueHandler(coinQueue, cq1, 'coinMatchUpdate', 'coinMatchFound', 4);
+const h3 = makeCoinQueueHandler(coinQueue3, cq3, 'coinMatch3Update', 'coinMatch3Found', 4);
+const h4 = makeCoinQueueHandler(coinQueue4, cq4, 'coinMatch4Update', 'coinMatch4Found', 4);
+const h5 = makeCoinQueueHandler(coinQueue5, cq5, 'coinMatch5Update', 'coinMatch5Found', 4);
+const h6 = makeCoinQueueHandler(coinQueue6, cq6, 'coinMatch6Update', 'coinMatch6Found', 4);
 
 const h10 = makeCoinQueueHandler(coinQueue10, cq10, 'coinMatch10Update', 'coinMatch10Found', 3);
 const h11 = makeCoinQueueHandler(coinQueue11, cq11, 'coinMatch11Update', 'coinMatch11Found', 3);
 const h12 = makeCoinQueueHandler(coinQueue12, cq12, 'coinMatch12Update', 'coinMatch12Found', 3);
 const h13 = makeCoinQueueHandler(coinQueue13, cq13, 'coinMatch13Update', 'coinMatch13Found', 3);
 
-const h2  = makeCoinQueueHandler(coinQueue2,  cq2,  'coinMatch2Update',  'coinMatch2Found',  2);
-const h7  = makeCoinQueueHandler(coinQueue7,  cq7,  'coinMatch7Update',  'coinMatch7Found',  2);
-const h8  = makeCoinQueueHandler(coinQueue8,  cq8,  'coinMatch8Update',  'coinMatch8Found',  2);
-const h9  = makeCoinQueueHandler(coinQueue9,  cq9,  'coinMatch9Update',  'coinMatch9Found',  2);
+const h2 = makeCoinQueueHandler(coinQueue2, cq2, 'coinMatch2Update', 'coinMatch2Found', 2);
+const h7 = makeCoinQueueHandler(coinQueue7, cq7, 'coinMatch7Update', 'coinMatch7Found', 2);
+const h8 = makeCoinQueueHandler(coinQueue8, cq8, 'coinMatch8Update', 'coinMatch8Found', 2);
+const h9 = makeCoinQueueHandler(coinQueue9, cq9, 'coinMatch9Update', 'coinMatch9Found', 2);
 
 // ─── FREE MATCHMAKING ─────────────────────────────────────────────────────────
 
@@ -235,6 +238,7 @@ io.on('connection', socket => {
 
     socket.on('joinMatchmaking', data => {
         socket.playerName = data.playerName;
+        socket.profileNumber = data.profileNumber;
         if (matchmakingQueue.find(s => s.id === socket.id)) return;
         matchmakingQueue.push(socket);
         matchmakingQueue.forEach(s =>
@@ -253,80 +257,84 @@ io.on('connection', socket => {
     // ── FRIEND ROOM — CREATE ──────────────────────────────────────────────────
 
     socket.on('createRoom', data => {
-        const { playerName, playerCount, coinAmount = 0 } = data;
+        const { playerName, playerCount, coinAmount = 0, profileNumber = 0 } = data; // add profileNumber
         socket.playerName = playerName;
+        socket.profileNumber = profileNumber;   // add this line
         const roomCode = generateCode();
 
         rooms[roomCode] = {
-            players:          [playerName],
-            maxPlayers:       playerCount || 4,
+            players: [playerName],
+            maxPlayers: playerCount || 4,
             currentTurnIndex: 0,
-            arrowCount:       10,
-            coinAmount:       parseInt(coinAmount) || 0   // ← store coin amount
+            arrowCount: 10,
+            coinAmount: parseInt(coinAmount) || 0,
+            profiles: { [playerName]: profileNumber }   // add this line
         };
 
         playerRoom[socket.id] = roomCode;
         socket.join(roomCode);
 
-        // Send object so Unity client gets coinAmount back
         socket.emit('roomCreated', JSON.stringify({ code: roomCode, coinAmount: rooms[roomCode].coinAmount }));
         io.to(roomCode).emit('playerList', rooms[roomCode].players);
+        io.to(roomCode).emit('playerProfiles', rooms[roomCode].profiles);   // add this line
     });
 
     // ── FRIEND ROOM — JOIN ────────────────────────────────────────────────────
 
     socket.on('joinRoom', data => {
-        const { roomName, playerName } = data;
+        const { roomName, playerName, profileNumber = 0 } = data;   // add profileNumber
         socket.playerName = playerName;
+        socket.profileNumber = profileNumber;   // add this line
         const r = rooms[roomName];
 
-        if (!r)                          { socket.emit('roomNotFound'); return; }
-        if (r.players.length >= r.maxPlayers) { socket.emit('roomFull');    return; }
+        if (!r) { socket.emit('roomNotFound'); return; }
+        if (r.players.length >= r.maxPlayers) { socket.emit('roomFull'); return; }
 
         r.players.push(playerName);
+        if (!r.profiles) r.profiles = {};       // add this line
+        r.profiles[playerName] = profileNumber; // add this line
         playerRoom[socket.id] = roomName;
         socket.join(roomName);
 
-        // Send object so Unity client gets coinAmount back
         socket.emit('joinedRoom', JSON.stringify({ code: roomName, coinAmount: r.coinAmount || 0 }));
         io.to(roomName).emit('playerList', r.players);
+        io.to(roomName).emit('playerProfiles', r.profiles);   // add this line
         io.to(roomName).emit('playerJoined', playerName);
 
         if (r.players.length >= r.maxPlayers) kickoffGame(roomName);
     });
-
     // ── COIN QUEUES ───────────────────────────────────────────────────────────
 
     // 4-player coin queues
-    socket.on('joinCoinMatch',  d => { socket.playerName = d.playerName; h1.join(socket); });
+    socket.on('joinCoinMatch', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h1.join(socket); });
     socket.on('leaveCoinMatch', () => h1.leave(socket));
-    socket.on('joinCoinMatch3',  d => { socket.playerName = d.playerName; h3.join(socket); });
+    socket.on('joinCoinMatch3', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h3.join(socket); });
     socket.on('leaveCoinMatch3', () => h3.leave(socket));
-    socket.on('joinCoinMatch4',  d => { socket.playerName = d.playerName; h4.join(socket); });
+    socket.on('joinCoinMatch4', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h4.join(socket); });
     socket.on('leaveCoinMatch4', () => h4.leave(socket));
-    socket.on('joinCoinMatch5',  d => { socket.playerName = d.playerName; h5.join(socket); });
+    socket.on('joinCoinMatch5', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h5.join(socket); });
     socket.on('leaveCoinMatch5', () => h5.leave(socket));
-    socket.on('joinCoinMatch6',  d => { socket.playerName = d.playerName; h6.join(socket); });
+    socket.on('joinCoinMatch6', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h6.join(socket); });
     socket.on('leaveCoinMatch6', () => h6.leave(socket));
 
     // 3-player coin queues
-    socket.on('joinCoinMatch10',  d => { socket.playerName = d.playerName; h10.join(socket); });
+    socket.on('joinCoinMatch10', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h10.join(socket); });
     socket.on('leaveCoinMatch10', () => h10.leave(socket));
-    socket.on('joinCoinMatch11',  d => { socket.playerName = d.playerName; h11.join(socket); });
+    socket.on('joinCoinMatch11', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h11.join(socket); });
     socket.on('leaveCoinMatch11', () => h11.leave(socket));
-    socket.on('joinCoinMatch12',  d => { socket.playerName = d.playerName; h12.join(socket); });
+    socket.on('joinCoinMatch12', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h12.join(socket); });
     socket.on('leaveCoinMatch12', () => h12.leave(socket));
-    socket.on('joinCoinMatch13',  d => { socket.playerName = d.playerName; h13.join(socket); });
+    socket.on('joinCoinMatch13', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h13.join(socket); });
     socket.on('leaveCoinMatch13', () => h13.leave(socket));
 
     // 2-player coin queues
-    socket.on('joinCoinMatch2',  d => { socket.playerName = d.playerName; h2.join(socket); });
+    socket.on('joinCoinMatch2', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h2.join(socket); });
     socket.on('leaveCoinMatch2', () => h2.leave(socket));
-    socket.on('joinCoinMatch7',  d => { socket.playerName = d.playerName; h7.join(socket); });
+    socket.on('joinCoinMatch7', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h7.join(socket); });
     socket.on('leaveCoinMatch7', () => h7.leave(socket));
-    socket.on('joinCoinMatch8',  d => { socket.playerName = d.playerName; h8.join(socket); });
+    socket.on('joinCoinMatch8', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h8.join(socket); });
     socket.on('leaveCoinMatch8', () => h8.leave(socket));
-    socket.on('joinCoinMatch9',  d => { socket.playerName = d.playerName; h9.join(socket); });
+    socket.on('joinCoinMatch9', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h9.join(socket); });
     socket.on('leaveCoinMatch9', () => h9.leave(socket));
 
     // ── IN-GAME ───────────────────────────────────────────────────────────────
@@ -364,12 +372,12 @@ io.on('connection', socket => {
         console.log('disconnect', socket.id);
         const mIdx = matchmakingQueue.findIndex(s => s.id === socket.id);
         if (mIdx !== -1) matchmakingQueue.splice(mIdx, 1);
-        h1.cleanup(socket);  h3.cleanup(socket);  h4.cleanup(socket);
-        h5.cleanup(socket);  h6.cleanup(socket);
+        h1.cleanup(socket); h3.cleanup(socket); h4.cleanup(socket);
+        h5.cleanup(socket); h6.cleanup(socket);
         h10.cleanup(socket); h11.cleanup(socket);
         h12.cleanup(socket); h13.cleanup(socket);
-        h2.cleanup(socket);  h7.cleanup(socket);
-        h8.cleanup(socket);  h9.cleanup(socket);
+        h2.cleanup(socket); h7.cleanup(socket);
+        h8.cleanup(socket); h9.cleanup(socket);
         const rc = playerRoom[socket.id];
         if (rc) {
             const r = rooms[rc];
