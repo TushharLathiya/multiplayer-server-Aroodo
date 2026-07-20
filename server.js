@@ -37,8 +37,10 @@ function isBot(name) { return name.startsWith('Bot '); }
 function setupRoom(playerSockets, roomCode, maxPlayers) {
     const playerNames = playerSockets.map(s => s.playerName);
     const profiles = {};
+    const rankNo = {};
     playerSockets.forEach(s => { profiles[s.playerName] = s.profileNumber || 0; });
-    rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10, profiles };
+    playerSockets.forEach(s => { rankNo[s.playerName] = s.rankNo || 0; });
+    rooms[roomCode] = { players: playerNames, maxPlayers, currentTurnIndex: 0, arrowCount: 10, profiles, rankNo };
     playerSockets.forEach(s => {
         if (!s.isFake) {
             playerRoom[s.id] = roomCode;
@@ -47,6 +49,7 @@ function setupRoom(playerSockets, roomCode, maxPlayers) {
     });
     io.to(roomCode).emit('playerList', playerNames);
     io.to(roomCode).emit('playerProfiles', profiles);
+    io.to(roomCode).emit('playerRanks', rankNo);
 }
 
 function kickoffGame(roomCode) {
@@ -257,9 +260,10 @@ io.on('connection', socket => {
     // ── FRIEND ROOM — CREATE ──────────────────────────────────────────────────
 
     socket.on('createRoom', data => {
-        const { playerName, playerCount, coinAmount = 0, profileNumber = 0 } = data; // add profileNumber
+        const { playerName, playerCount, coinAmount = 0, profileNumber = 0, rankNo = 0 } = data; // add profileNumber
         socket.playerName = playerName;
         socket.profileNumber = profileNumber;   // add this line
+        socket.rankNo = rankNo;   // add this line
         const roomCode = generateCode();
 
         rooms[roomCode] = {
@@ -268,7 +272,8 @@ io.on('connection', socket => {
             currentTurnIndex: 0,
             arrowCount: 10,
             coinAmount: parseInt(coinAmount) || 0,
-            profiles: { [playerName]: profileNumber }   // add this line
+            profiles: { [playerName]: profileNumber },
+            rankNo: { [playerName]: rankNo }  // add this line
         };
 
         playerRoom[socket.id] = roomCode;
@@ -277,28 +282,33 @@ io.on('connection', socket => {
         socket.emit('roomCreated', JSON.stringify({ code: roomCode, coinAmount: rooms[roomCode].coinAmount }));
         io.to(roomCode).emit('playerList', rooms[roomCode].players);
         io.to(roomCode).emit('playerProfiles', rooms[roomCode].profiles);   // add this line
+        io.to(roomCode).emit('playerRanks', rooms[roomCode].rankNo);   // add this line
     });
 
     // ── FRIEND ROOM — JOIN ────────────────────────────────────────────────────
 
     socket.on('joinRoom', data => {
-        const { roomName, playerName, profileNumber = 0 } = data;   // add profileNumber
+        const { roomName, playerName, profileNumber = 0, rankNo = 0 } = data;   // add profileNumber
         socket.playerName = playerName;
         socket.profileNumber = profileNumber;   // add this line
+        socket.rankNo = rankNo;   // add this line
         const r = rooms[roomName];
 
         if (!r) { socket.emit('roomNotFound'); return; }
         if (r.players.length >= r.maxPlayers) { socket.emit('roomFull'); return; }
 
         r.players.push(playerName);
-        if (!r.profiles) r.profiles = {};       // add this line
-        r.profiles[playerName] = profileNumber; // add this line
+        if (!r.profiles) r.profiles = {};
+        r.profiles[playerName] = profileNumber;
+        if (!r.rankNo) r.rankNo = {};
+        r.rankNo[playerName] = rankNo;// add this line
         playerRoom[socket.id] = roomName;
         socket.join(roomName);
 
         socket.emit('joinedRoom', JSON.stringify({ code: roomName, coinAmount: r.coinAmount || 0 }));
         io.to(roomName).emit('playerList', r.players);
         io.to(roomName).emit('playerProfiles', r.profiles);   // add this line
+        io.to(roomName).emit('playerRanks', r.rankNo);  // add this line
         io.to(roomName).emit('playerJoined', playerName);
 
         if (r.players.length >= r.maxPlayers) kickoffGame(roomName);
@@ -306,35 +316,35 @@ io.on('connection', socket => {
     // ── COIN QUEUES ───────────────────────────────────────────────────────────
 
     // 4-player coin queues
-    socket.on('joinCoinMatch', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h1.join(socket); });
+    socket.on('joinCoinMatch', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h1.join(socket); });
     socket.on('leaveCoinMatch', () => h1.leave(socket));
-    socket.on('joinCoinMatch3', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h3.join(socket); });
+    socket.on('joinCoinMatch3', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h3.join(socket); });
     socket.on('leaveCoinMatch3', () => h3.leave(socket));
-    socket.on('joinCoinMatch4', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h4.join(socket); });
+    socket.on('joinCoinMatch4', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h4.join(socket); });
     socket.on('leaveCoinMatch4', () => h4.leave(socket));
-    socket.on('joinCoinMatch5', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h5.join(socket); });
+    socket.on('joinCoinMatch5', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h5.join(socket); });
     socket.on('leaveCoinMatch5', () => h5.leave(socket));
-    socket.on('joinCoinMatch6', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h6.join(socket); });
+    socket.on('joinCoinMatch6', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h6.join(socket); });
     socket.on('leaveCoinMatch6', () => h6.leave(socket));
 
     // 3-player coin queues
-    socket.on('joinCoinMatch10', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h10.join(socket); });
+    socket.on('joinCoinMatch10', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h10.join(socket); });
     socket.on('leaveCoinMatch10', () => h10.leave(socket));
-    socket.on('joinCoinMatch11', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h11.join(socket); });
+    socket.on('joinCoinMatch11', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h11.join(socket); });
     socket.on('leaveCoinMatch11', () => h11.leave(socket));
-    socket.on('joinCoinMatch12', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h12.join(socket); });
+    socket.on('joinCoinMatch12', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h12.join(socket); });
     socket.on('leaveCoinMatch12', () => h12.leave(socket));
-    socket.on('joinCoinMatch13', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h13.join(socket); });
+    socket.on('joinCoinMatch13', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h13.join(socket); });
     socket.on('leaveCoinMatch13', () => h13.leave(socket));
 
     // 2-player coin queues
-    socket.on('joinCoinMatch2', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h2.join(socket); });
+    socket.on('joinCoinMatch2', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h2.join(socket); });
     socket.on('leaveCoinMatch2', () => h2.leave(socket));
-    socket.on('joinCoinMatch7', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h7.join(socket); });
+    socket.on('joinCoinMatch7', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h7.join(socket); });
     socket.on('leaveCoinMatch7', () => h7.leave(socket));
-    socket.on('joinCoinMatch8', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h8.join(socket); });
+    socket.on('joinCoinMatch8', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h8.join(socket); });
     socket.on('leaveCoinMatch8', () => h8.leave(socket));
-    socket.on('joinCoinMatch9', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; h9.join(socket); });
+    socket.on('joinCoinMatch9', d => { socket.playerName = d.playerName; socket.profileNumber = d.profileNumber; socket.rankNo = d.rankNo; h9.join(socket); });
     socket.on('leaveCoinMatch9', () => h9.leave(socket));
 
     // ── IN-GAME ───────────────────────────────────────────────────────────────
